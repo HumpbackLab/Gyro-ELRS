@@ -15,6 +15,7 @@ typedef enum {
     BOOL,
     FLOAT,
     ARRAY,
+    FLOAT_ARRAY,
     COUNT
 } datatype_t;
 
@@ -123,6 +124,17 @@ static const struct {
     {HARDWARE_thermal_lm75a, "thermal_lm75a", BOOL},
     {HARDWARE_pwm_outputs, "pwm_outputs", ARRAY},
     {HARDWARE_pwm_outputs_count, "pwm_outputs", COUNT},
+    {HARDWARE_fc_mixer, "fc_mixer", FLOAT_ARRAY},
+    {HARDWARE_fc_mixer_count, "fc_mixer", COUNT},
+    {HARDWARE_fc_pid, "fc_pid", FLOAT_ARRAY},
+    {HARDWARE_fc_pid_count, "fc_pid", COUNT},
+    {HARDWARE_fc_rate_pid, "fc_rate_pid", FLOAT_ARRAY},
+    {HARDWARE_fc_rate_pid_count, "fc_rate_pid", COUNT},
+    {HARDWARE_fc_angle_pid, "fc_angle_pid", FLOAT_ARRAY},
+    {HARDWARE_fc_angle_pid_count, "fc_angle_pid", COUNT},
+    {HARDWARE_fc_angle_enabled, "fc_angle_enabled", BOOL},
+    {HARDWARE_fc_orientation, "fc_orientation", FLOAT_ARRAY},
+    {HARDWARE_fc_orientation_count, "fc_orientation", COUNT},
     {HARDWARE_vbat, "vbat", INT},
     {HARDWARE_vbat_offset, "vbat_offset", INT},
     {HARDWARE_vbat_scale, "vbat_scale", INT},
@@ -145,6 +157,7 @@ typedef union {
     bool bool_value;
     float float_value;
     int16_t *array_value;
+    float *float_array_value;
 } data_holder_t;
 
 static data_holder_t hardware[HARDWARE_LAST];
@@ -182,6 +195,9 @@ static void hardware_ClearAllFields()
             case ARRAY:
                 hardware[fields[i].position].array_value = nullptr;
                 break;
+            case FLOAT_ARRAY:
+                hardware[fields[i].position].float_array_value = nullptr;
+                break;
             case COUNT:
                 hardware[fields[i].position].int_value = 0;
                 break;
@@ -208,6 +224,13 @@ static void hardware_LoadFieldsFromDoc(JsonDocument &doc)
                         JsonArray array = doc[fields[i].name].as<JsonArray>();
                         hardware[fields[i].position].array_value = new int16_t[array.size()];
                         copyArray(doc[fields[i].name], hardware[fields[i].position].array_value, array.size());
+                    }
+                    break;
+                case FLOAT_ARRAY:
+                    {
+                        JsonArray array = doc[fields[i].name].as<JsonArray>();
+                        hardware[fields[i].position].float_array_value = new float[array.size()];
+                        copyArray(doc[fields[i].name], hardware[fields[i].position].float_array_value, array.size());
                     }
                     break;
                 case COUNT:
@@ -284,6 +307,11 @@ const int16_t* hardware_i16_array(nameType name)
 const uint16_t* hardware_u16_array(nameType name)
 {
     return (uint16_t *)hardware[name].array_value;
+}
+
+const float* hardware_float_array(nameType name)
+{
+    return hardware[name].float_array_value;
 }
 
 #endif

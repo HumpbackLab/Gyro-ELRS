@@ -128,6 +128,19 @@ typedef enum {
     HARDWARE_pwm_outputs,
     HARDWARE_pwm_outputs_count,
 
+    // Flight control
+    HARDWARE_fc_mixer,
+    HARDWARE_fc_mixer_count,
+    HARDWARE_fc_pid,
+    HARDWARE_fc_pid_count,
+    HARDWARE_fc_rate_pid,
+    HARDWARE_fc_rate_pid_count,
+    HARDWARE_fc_angle_pid,
+    HARDWARE_fc_angle_pid_count,
+    HARDWARE_fc_angle_enabled,
+    HARDWARE_fc_orientation,
+    HARDWARE_fc_orientation_count,
+
     // VBAT
     HARDWARE_vbat,
     HARDWARE_vbat_offset,
@@ -157,3 +170,4 @@ const int hardware_int(nameType name);
 const float hardware_float(nameType name);
 const int16_t* hardware_i16_array(nameType name);
 const uint16_t* hardware_u16_array(nameType name);
+const float* hardware_float_array(nameType name);

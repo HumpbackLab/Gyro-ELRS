@@ -33,6 +33,7 @@
 #include "devWIFI.h"
 #include "devButton.h"
 #include "devServoOutput.h"
+#include "devFlightControl.h"
 #include "devVTXSPI.h"
 #include "devAnalogVbat.h"
 #include "devSerialUpdate.h"
@@ -104,6 +105,9 @@ device_affinity_t ui_devices[] = {
 #endif
 #ifdef HAS_SERVO_OUTPUT
   {&ServoOut_device, 1},
+#endif
+#if defined(HAS_BASIC_FLIGHT_CONTROL)
+  {&FlightControl_device, 1},
 #endif
 #ifdef HAS_BARO
   {&Baro_device, 0}, // must come after AnalogVbat_device to slow updates
@@ -798,7 +802,10 @@ void ICACHE_RAM_ATTR HWtimerCallbackTock()
         {
             crsfRCFrameAvailable();
             if (teamraceHasModelMatch)
+            {
                 servoNewChannelsAvailable();
+                flightControlNewChannelsAvailable();
+            }
         }
         else
         {
@@ -933,7 +940,10 @@ static void ICACHE_RAM_ATTR ProcessRfPacket_RC(OTA_Packet_s const * const otaPkt
             // teamrace is only checked for servos because the teamrace model select logic only runs
             // when new frames are available, and will decide later if the frame will be forwarded
             if (teamraceHasModelMatch)
+            {
                 servoNewChannelsAvailable();
+                flightControlNewChannelsAvailable();
+            }
         }
         else if (!LQCalcDVDA.currentIsSet())
         {
