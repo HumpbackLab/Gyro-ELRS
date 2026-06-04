@@ -2,6 +2,10 @@
 
 #if defined(PLATFORM_ESP8266) || defined(PLATFORM_ESP32)
 
+#if !defined(LOCAL_WEBUI)
+#define WIFI_ENABLE_MDNS
+#endif
+
 #include "deferred.h"
 
 #include <AsyncJson.h>
@@ -14,14 +18,18 @@
 
 #if defined(PLATFORM_ESP32)
 #include <WiFi.h>
+#if defined(WIFI_ENABLE_MDNS)
 #include <ESPmDNS.h>
+#endif
 #include <Update.h>
 #include <esp_partition.h>
 #include <esp_ota_ops.h>
 #include <soc/uart_pins.h>
 #else
 #include <ESP8266WiFi.h>
+#if defined(WIFI_ENABLE_MDNS)
 #include <ESP8266mDNS.h>
+#endif
 #define wifi_mode_t WiFiMode_t
 #endif
 #include <DNSServer.h>
@@ -43,7 +51,9 @@
 #include "devVTXSPI.h"
 #include "devButton.h"
 
+#if !defined(LOCAL_WEBUI)
 #include "WebContent.h"
+#endif
 
 #include "config.h"
 
@@ -100,6 +110,16 @@ static bool target_complete = false;
 static bool force_update = false;
 static uint32_t totalSize;
 
+#if defined(LOCAL_WEBUI)
+static const char LOCAL_WEBUI_HTML[] PROGMEM =
+  "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+  "<title>ExpressLRS</title></head><body>"
+  "<h1>ExpressLRS device API</h1>"
+  "<p>The Web UI is no longer stored in this firmware. Open the local ExpressLRS Web UI package on your computer and connect it to this device.</p>"
+  "<p>Default AP API address: <code>http://10.0.0.1</code></p>"
+  "</body></html>";
+#endif
+
 void setWifiUpdateMode()
 {
   // No need to ExitBindingMode(), the radio will be stopped stopped when start the Wifi service.
@@ -147,6 +167,7 @@ static bool captivePortal(AsyncWebServerRequest *request)
   return false;
 }
 
+#if !defined(LOCAL_WEBUI)
 static struct {
   const char *url;
   const char *contentType;
@@ -165,7 +186,9 @@ static struct {
   {"/lr1121.js", "text/javascript", (uint8_t *)LR1121_JS, sizeof(LR1121_JS)},
 #endif
 };
+#endif
 
+#if !defined(LOCAL_WEBUI)
 static void WebUpdateSendContent(AsyncWebServerRequest *request)
 {
   for (size_t i=0 ; i<ARRAY_SIZE(files) ; i++) {
@@ -178,6 +201,7 @@ static void WebUpdateSendContent(AsyncWebServerRequest *request)
   }
   request->send(404, "text/plain", "File not found");
 }
+#endif
 
 static void WebUpdateHandleRoot(AsyncWebServerRequest *request)
 {
@@ -186,6 +210,9 @@ static void WebUpdateHandleRoot(AsyncWebServerRequest *request)
     return;
   }
   force_update = request->hasArg("force");
+#if defined(LOCAL_WEBUI)
+  AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", (const uint8_t *)LOCAL_WEBUI_HTML, sizeof(LOCAL_WEBUI_HTML) - 1);
+#else
   AsyncWebServerResponse *response;
   if (connectionState == hardwareUndefined)
   {
@@ -196,6 +223,7 @@ static void WebUpdateHandleRoot(AsyncWebServerRequest *request)
     response = request->beginResponse_P(200, "text/html", (uint8_t*)INDEX_HTML, sizeof(INDEX_HTML));
   }
   response->addHeader("Content-Encoding", "gzip");
+#endif
   response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   response->addHeader("Pragma", "no-cache");
   response->addHeader("Expires", "-1");
@@ -553,7 +581,7 @@ static void WebUpdateGetTarget(AsyncWebServerRequest *request)
 {
   JsonDocument json;
   json["target"] = &target_name[4];
-  json["version"] = VERSION;
+  json["version"] = String(version) + " (" + commit + ")";
   json["product_name"] = product_name;
   json["lua_name"] = device_name;
   json["reg_domain"] = FHSSgetRegulatoryDomain();
@@ -867,7 +895,7 @@ static void WebUpdateGetFirmware(AsyncWebServerRequest *request) {
   #endif
   const size_t firmwareTrailerSize = 4096;  // max number of bytes for the options/hardware layout json
   AsyncWebServerResponse *response = request->beginResponse("application/octet-stream", (size_t)ESP.getSketchSize() + firmwareTrailerSize, &getFirmwareChunk);
-  String filename = String("attachment; filename=\"") + (const char *)&target_name[4] + "_" + VERSION + ".bin\"";
+  String filename = String("attachment; filename=\"") + (const char *)&target_name[4] + "_" + version + ".bin\"";
   response->addHeader("Content-Disposition", filename);
   request->send(response);
 }
@@ -964,6 +992,7 @@ static void startWiFi(unsigned long now)
   wifiStarted = true;
 }
 
+#if defined(WIFI_ENABLE_MDNS)
 static void startMDNS()
 {
   if (!MDNS.begin(wifi_hostname))
@@ -1001,7 +1030,7 @@ static void startMDNS()
     MDNS.addServiceTxt(service, "target", (const char *)&target_name[4]);
     MDNS.addServiceTxt(service, "device", (const char *)device_name);
     MDNS.addServiceTxt(service, "product", (const char *)product_name);
-    MDNS.addServiceTxt(service, "version", VERSION);
+    MDNS.addServiceTxt(service, "version", version);
     MDNS.addServiceTxt(service, "options", options.c_str());
     MDNS.addServiceTxt(service, "type", "rx");
     // If the probe result fails because there is another device on the network with the same name
@@ -1020,7 +1049,7 @@ static void startMDNS()
     MDNS.addServiceTxt("http", "tcp", "target", (const char *)&target_name[4]);
     MDNS.addServiceTxt("http", "tcp", "device", (const char *)device_name);
     MDNS.addServiceTxt("http", "tcp", "product", (const char *)product_name);
-    MDNS.addServiceTxt("http", "tcp", "version", VERSION);
+    MDNS.addServiceTxt("http", "tcp", "version", version);
     MDNS.addServiceTxt("http", "tcp", "options", options.c_str());
   #ifdef TARGET_TX
     MDNS.addServiceTxt("http", "tcp", "type", "tx");
@@ -1035,6 +1064,7 @@ static void startMDNS()
     MDNS.addServiceTxt("elrs", "udp", "version", String(JOYSTICK_VERSION).c_str());
   #endif
 }
+#endif
 
 static void addCaptivePortalHandlers()
 {
@@ -1059,7 +1089,7 @@ static void addCaptivePortalHandlers()
 static void startServices()
 {
   if (servicesStarted) {
-    #if defined(PLATFORM_ESP32)
+    #if defined(PLATFORM_ESP32) && defined(WIFI_ENABLE_MDNS)
       MDNS.end();
       startMDNS();
     #endif
@@ -1067,14 +1097,17 @@ static void startServices()
   }
 
   server.on("/", WebUpdateHandleRoot);
+#if !defined(LOCAL_WEBUI)
   server.on("/elrs.css", WebUpdateSendContent);
   server.on("/mui.js", WebUpdateSendContent);
   server.on("/scan.js", WebUpdateSendContent);
+#endif
   server.on("/networks.json", WebUpdateSendNetworks);
   server.on("/sethome", WebUpdateSetHome);
   server.on("/forget", WebUpdateForget);
   server.on("/connect", WebUpdateConnect);
   server.on("/config", HTTP_GET, GetConfiguration);
+  server.on("/config", HTTP_OPTIONS, corsPreflightResponse);
   server.on("/access", WebUpdateAccessPoint);
   server.on("/target", WebUpdateGetTarget);
   server.on("/firmware.bin", WebUpdateGetFirmware);
@@ -1083,8 +1116,10 @@ static void startServices()
   server.on("/update", HTTP_OPTIONS, corsPreflightResponse);
   server.on("/forceupdate", WebUploadForceUpdateHandler);
   server.on("/forceupdate", HTTP_OPTIONS, corsPreflightResponse);
+#if !defined(LOCAL_WEBUI)
   server.on("/cw.html", WebUpdateSendContent);
   server.on("/cw.js", WebUpdateSendContent);
+#endif
   server.on("/cw", HandleContinuousWave);
 
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
@@ -1092,12 +1127,18 @@ static void startServices()
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "POST,GET,OPTIONS");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "*");
 
+#if !defined(LOCAL_WEBUI)
   server.on("/hardware.html", WebUpdateSendContent);
   server.on("/hardware.js", WebUpdateSendContent);
+#endif
   server.on("/hardware.json", getFile).onBody(putFile);
   server.on("/options.json", HTTP_GET, getFile);
+  server.on("/hardware.json", HTTP_OPTIONS, corsPreflightResponse);
+  server.on("/options.json", HTTP_OPTIONS, corsPreflightResponse);
   server.on("/reboot", HandleReboot);
+  server.on("/reboot", HTTP_OPTIONS, corsPreflightResponse);
   server.on("/reset", HandleReset);
+  server.on("/reset", HTTP_OPTIONS, corsPreflightResponse);
   #ifdef HAS_WIFI_JOYSTICK
     server.on("/udpcontrol", HTTP_POST, WebUdpControl);
   #endif
@@ -1107,12 +1148,17 @@ static void startServices()
   #if defined(TARGET_TX)
     server.addHandler(new AsyncCallbackJsonWebHandler("/buttons", WebUpdateButtonColors));
     server.addHandler(new AsyncCallbackJsonWebHandler("/import", ImportConfiguration, 32768U));
+    server.on("/buttons", HTTP_OPTIONS, corsPreflightResponse);
+    server.on("/import", HTTP_OPTIONS, corsPreflightResponse);
   #endif
 
   #if defined(RADIO_LR1121)
+  #if !defined(LOCAL_WEBUI)
     server.on("/lr1121.html", WebUpdateSendContent);
     server.on("/lr1121.js", WebUpdateSendContent);
+  #endif
     server.on("/lr1121", HTTP_OPTIONS, corsPreflightResponse);
+    server.on("/lr1121.json", HTTP_OPTIONS, corsPreflightResponse);
     addLR1121Handlers(server);
   #endif
 
@@ -1125,14 +1171,20 @@ static void startServices()
   dnsServer.start(DNS_PORT, "*", ipAddress);
   dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
 
-  startMDNS();
+  #if defined(WIFI_ENABLE_MDNS)
+    startMDNS();
+  #endif
 
   #ifdef HAS_WIFI_JOYSTICK
     WifiJoystick::StartJoystickService();
   #endif
 
   servicesStarted = true;
+#if defined(WIFI_ENABLE_MDNS)
   DBGLN("HTTPUpdateServer ready! Open http://%s.local in your browser", wifi_hostname);
+#else
+  DBGLN("HTTPUpdateServer ready!");
+#endif
   #if defined(USE_MSP_WIFI) && defined(TARGET_RX)
   wifi2tcp.begin();
   #endif
@@ -1213,7 +1265,7 @@ static void HandleWebUpdate()
       default:
         break;
     }
-    #if defined(PLATFORM_ESP8266)
+    #if defined(PLATFORM_ESP8266) && defined(WIFI_ENABLE_MDNS)
       MDNS.notifyAPChange();
     #endif
     changeMode = WIFI_OFF;
@@ -1230,7 +1282,7 @@ static void HandleWebUpdate()
   if (servicesStarted)
   {
     dnsServer.processNextRequest();
-    #if defined(PLATFORM_ESP8266)
+    #if defined(PLATFORM_ESP8266) && defined(WIFI_ENABLE_MDNS)
       MDNS.update();
     #endif
 

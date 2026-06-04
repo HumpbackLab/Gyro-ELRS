@@ -4,6 +4,62 @@
 
 // =========================================================
 
+const elrsApi = (() => {
+  const defaultHost = 'http://10.0.0.1';
+  const storageKey = 'elrs-api-base';
+
+  function normalize(host) {
+    if (!host) return defaultHost;
+    host = host.trim();
+    if (!/^https?:\/\//i.test(host)) host = `http://${host}`;
+    return host.replace(/\/+$/, '');
+  }
+
+  function base() {
+    const params = new URLSearchParams(window.location.search);
+    const requested = params.get('host') || params.get('api');
+    if (requested) {
+      const value = normalize(requested);
+      localStorage.setItem(storageKey, value);
+      return value;
+    }
+    return normalize(localStorage.getItem(storageKey) || defaultHost);
+  }
+
+  function url(path) {
+    if (!path || /^(https?:|blob:|data:)/i.test(path)) return path;
+    if (path[0] === '/') return base() + path;
+    return `${base()}/${path}`;
+  }
+
+  function rewriteLinks() {
+    document.querySelectorAll('a[href]').forEach((link) => {
+      const href = link.getAttribute('href');
+      if (href && (href[0] === '/' || href === 'firmware.bin')) {
+        link.setAttribute('href', url(href));
+      }
+    });
+    document.querySelectorAll('form[action]').forEach((form) => {
+      const action = form.getAttribute('action');
+      if (action && action[0] === '/') {
+        form.setAttribute('action', url(action));
+      }
+    });
+  }
+
+  return {base, url, rewriteLinks};
+})();
+
+(() => {
+  const open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
+    return open.call(this, method, elrsApi.url(url), async, user, password);
+  };
+  document.addEventListener('DOMContentLoaded', elrsApi.rewriteLinks, false);
+})();
+
+// =========================================================
+
 function postWithFeedback(title, msg, url, getdata, success) {
   return function(e) {
     e.stopPropagation();
