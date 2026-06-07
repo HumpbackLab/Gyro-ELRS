@@ -2,6 +2,7 @@ import './styles.css';
 
 const DEFAULT_API = 'http://10.0.0.1';
 const API_STORAGE_KEY = 'elrs-local-rx-api';
+const LOCAL_PROXY_PATH = '/__elrs_proxy__';
 
 const state = {
   apiBase: loadApiBase(),
@@ -16,6 +17,7 @@ const state = {
   message: null,
   busy: false,
   uploadResult: null,
+  uploadProgress: null,
   extraMixerRows: 0,
   eulerRoll: 0,
   eulerPitch: 0,
@@ -137,7 +139,13 @@ function loadApiBase() {
 }
 
 function apiUrl(path) {
-  return `${state.apiBase}${path.startsWith('/') ? path : `/${path}`}`;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  if (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost') {
+    const url = new URL(`${window.location.origin}${LOCAL_PROXY_PATH}${normalizedPath}`);
+    url.searchParams.set('target', state.apiBase);
+    return url.toString();
+  }
+  return `${state.apiBase}${normalizedPath}`;
 }
 
 async function apiFetch(path, options = {}) {
@@ -163,6 +171,55 @@ async function apiFetch(path, options = {}) {
     throw new Error(`${response.status} ${detail}`);
   }
   return body;
+}
+
+function xhrRequest(path, options = {}) {
+  const {
+    method = 'GET',
+    body,
+    headers = {},
+    timeout = 5000,
+    onUploadProgress = null,
+  } = options;
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, apiUrl(path), true);
+    xhr.timeout = timeout;
+
+    Object.entries(headers).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        xhr.setRequestHeader(key, value);
+      }
+    });
+
+    if (typeof onUploadProgress === 'function' && xhr.upload) {
+      xhr.upload.onprogress = onUploadProgress;
+    }
+
+    xhr.onload = () => {
+      const contentType = xhr.getResponseHeader('content-type') || '';
+      const bodyText = xhr.responseText || '';
+      let parsedBody = bodyText;
+      if (contentType.includes('application/json')) {
+        try {
+          parsedBody = bodyText ? JSON.parse(bodyText) : {};
+        } catch {
+          parsedBody = bodyText;
+        }
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const detail = typeof parsedBody === 'string' ? parsedBody : JSON.stringify(parsedBody);
+        reject(new Error(`${xhr.status} ${detail}`));
+        return;
+      }
+      resolve(parsedBody);
+    };
+
+    xhr.onerror = () => reject(new Error(`Failed connecting to ${state.apiBase}`));
+    xhr.ontimeout = () => reject(new Error(`Timeout connecting to ${state.apiBase}`));
+    xhr.send(body);
+  });
 }
 
 function setMessage(type, text) {
@@ -660,25 +717,43 @@ async function uploadFirmware(event) {
     return;
   }
   await runBusy(async () => {
+    state.uploadProgress = {loaded: 0, total: file.size, phase: 'Uploading firmware'};
+    render();
     const form = new FormData();
     form.set('update[]', file, file.name);
-    const result = await apiFetch('/update', {
+    const result = await xhrRequest('/update', {
       method: 'POST',
       body: form,
       headers: {'X-FileSize': String(file.size)},
+      timeout: 90000,
+      onUploadProgress: (progressEvent) => {
+        state.uploadProgress = {
+          loaded: progressEvent.loaded,
+          total: progressEvent.lengthComputable ? progressEvent.total : file.size,
+          phase: progressEvent.loaded >= file.size ? 'Finalizing update on device' : 'Uploading firmware',
+        };
+        render();
+      },
     });
     state.uploadResult = result;
-    if (result.status === 'mismatch') {
-      throw new Error(result.msg || 'Firmware target mismatch');
+    if (result.status !== 'ok') {
+      throw new Error(result.msg || `Firmware update failed (${result.status || 'unknown'})`);
     }
+    state.uploadProgress = {
+      loaded: file.size,
+      total: file.size,
+      phase: 'Device accepted update and is rebooting',
+    };
   }, 'Firmware upload finished');
+  state.uploadProgress = null;
+  render();
 }
 
 async function forceUpdate(action) {
   const form = new FormData();
   form.set('action', action);
   await runBusy(async () => {
-    state.uploadResult = await apiFetch('/forceupdate', {method: 'POST', body: form});
+    state.uploadResult = await xhrRequest('/forceupdate', {method: 'POST', body: form, timeout: 90000});
   }, action === 'confirm' ? 'Forced update confirmed' : 'Forced update cancelled');
 }
 
@@ -977,12 +1052,18 @@ function renderWifi() {
 function renderUpdate() {
   const firmwareHref = apiUrl('/firmware.bin');
   const mismatch = state.uploadResult?.status === 'mismatch';
+  const uploadProgress = state.uploadProgress;
+  const uploadError = state.uploadResult && state.uploadResult.status !== 'ok'
+    ? `<div class="notice">${escapeHtml(state.uploadResult.msg || `Firmware update failed (${state.uploadResult.status || 'unknown'})`)}</div>`
+    : '';
+  const progressPercent = uploadProgress?.total ? Math.max(0, Math.min(100, Math.round((uploadProgress.loaded / uploadProgress.total) * 100))) : 0;
   return `
     <section class="panel">
       <h2>Firmware Update</h2>
-      ${mismatch ? `<div class="notice">${state.uploadResult.msg}</div>` : ''}
+      ${uploadError}
       <form id="update-form">
         <div class="row"><label for="firmware">Firmware file</label><input id="firmware" name="firmware" type="file"></div>
+        ${uploadProgress ? `<div class="upload-progress"><div class="upload-progress-meta"><span>${escapeHtml(uploadProgress.phase)}</span><strong>${progressPercent}%</strong></div><div class="upload-progress-bar"><span style="width:${progressPercent}%"></span></div></div>` : ''}
         <div class="actions"><button class="primary" ${state.busy ? 'disabled' : ''}>Upload</button><a class="secondary button-link" href="${firmwareHref}">Download Current Firmware</a>${mismatch ? '<button class="danger" type="button" data-action="force-confirm">Flash Anyway</button><button class="secondary" type="button" data-action="force-cancel">Cancel</button>' : ''}</div>
       </form>
     </section>`;

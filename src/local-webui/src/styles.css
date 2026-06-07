@@ -317,6 +317,33 @@ button:disabled {
   padding: 10px 12px;
 }
 
+.upload-progress {
+  margin: 12px 0 4px;
+}
+
+.upload-progress-meta {
+  align-items: center;
+  color: #465160;
+  display: flex;
+  font-size: 13px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.upload-progress-bar {
+  background: #e5ebf0;
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.upload-progress-bar span {
+  background: #1f7a6d;
+  display: block;
+  height: 100%;
+  transition: width 120ms linear;
+}
+
 .message {
   border-radius: 6px;
   margin-bottom: 16px;
