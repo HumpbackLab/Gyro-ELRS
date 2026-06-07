@@ -6,6 +6,9 @@
 #include "config.h"
 #include "logging.h"
 #include "rxtx_intf.h"
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+#include "devFlightControl.h"
+#endif
 
 static int8_t servoPins[PWM_MAX_CHANNELS];
 static pwm_channel_t pwmChannels[PWM_MAX_CHANNELS];
@@ -112,8 +115,18 @@ static void servosUpdate(unsigned long now)
     {
         newChannelsAvailable = false;
         lastUpdate = now;
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+        const FlightControlMixerOutput &mixerOutput = flightControlGetMixerOutput();
+#endif
         for (int ch = 0 ; ch < GPIO_PIN_PWM_OUTPUTS_COUNT ; ++ch)
         {
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+            if (mixerOutput.motorCount > ch)
+            {
+                servoWrite(ch, mixerOutput.motorUs[ch]);
+                continue;
+            }
+#endif
             const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
             const unsigned crsfVal = ChannelData[chConfig->val.inputChannel];
             // crsfVal might 0 if this is a switch channel, and it has not been
