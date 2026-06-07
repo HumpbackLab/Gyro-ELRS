@@ -118,6 +118,78 @@ static struct luaItem_selection luaTeamracePosition = {
     STR_EMPTYSPACE
 };
 
+#if defined(HAS_BASIC_FLIGHT_CONTROL)
+static struct luaItem_folder luaFlightControlFolder = {
+    {"Flight Control", CRSF_FOLDER},
+};
+
+static struct luaItem_folder luaFlightControlRateFolder = {
+    {"Rate PID", CRSF_FOLDER},
+};
+
+static struct luaItem_folder luaFlightControlAngleFolder = {
+    {"Angle PID", CRSF_FOLDER},
+};
+
+static struct luaItem_selection luaFlightControlAngleMode = {
+    {"Angle Mode", CRSF_TEXT_SELECTION},
+    0,
+    "Off;On",
+    STR_EMPTYSPACE
+};
+
+static struct luaItem_command luaFlightControlSave = {
+    {"Save FC Params", CRSF_COMMAND},
+    lcsIdle,
+    STR_EMPTYSPACE
+};
+
+#define LUA_PID_INT16_ITEM(label) \
+{ \
+  {label, CRSF_INT16}, \
+  { \
+    { \
+      (int16_t)0, \
+      (int16_t)0, \
+      (int16_t)20000, \
+    } \
+  }, \
+  " x100" \
+}
+
+static struct luaItem_int16 luaFlightControlRatePid[] = {
+    LUA_PID_INT16_ITEM("Roll Kp"),
+    LUA_PID_INT16_ITEM("Roll Ki"),
+    LUA_PID_INT16_ITEM("Roll Kd"),
+    LUA_PID_INT16_ITEM("Roll ILim"),
+    LUA_PID_INT16_ITEM("Pitch Kp"),
+    LUA_PID_INT16_ITEM("Pitch Ki"),
+    LUA_PID_INT16_ITEM("Pitch Kd"),
+    LUA_PID_INT16_ITEM("Pitch ILim"),
+    LUA_PID_INT16_ITEM("Yaw Kp"),
+    LUA_PID_INT16_ITEM("Yaw Ki"),
+    LUA_PID_INT16_ITEM("Yaw Kd"),
+    LUA_PID_INT16_ITEM("Yaw ILim"),
+};
+
+static struct luaItem_int16 luaFlightControlAnglePid[] = {
+    LUA_PID_INT16_ITEM("Roll Kp"),
+    LUA_PID_INT16_ITEM("Roll Ki"),
+    LUA_PID_INT16_ITEM("Roll Kd"),
+    LUA_PID_INT16_ITEM("Roll ILim"),
+    LUA_PID_INT16_ITEM("Pitch Kp"),
+    LUA_PID_INT16_ITEM("Pitch Ki"),
+    LUA_PID_INT16_ITEM("Pitch Kd"),
+    LUA_PID_INT16_ITEM("Pitch ILim"),
+    LUA_PID_INT16_ITEM("Yaw Kp"),
+    LUA_PID_INT16_ITEM("Yaw Ki"),
+    LUA_PID_INT16_ITEM("Yaw Kd"),
+    LUA_PID_INT16_ITEM("Yaw ILim"),
+};
+
+#undef LUA_PID_INT16_ITEM
+#endif
+
 //----------------------------Info-----------------------------------
 
 static struct luaItem_string luaModelNumber = {
@@ -204,6 +276,76 @@ static struct luaItem_command luaBindMode = {
     lcsIdle, // step
     STR_EMPTYSPACE
 };
+
+#if defined(HAS_BASIC_FLIGHT_CONTROL)
+static int findFlightControlPidIndex(const struct luaPropertiesCommon *item, const struct luaItem_int16 *items, uint8_t count)
+{
+  for (uint8_t i = 0; i < count; ++i)
+  {
+    if (&items[i].common == item)
+    {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+static void luaparamFlightControlRatePid(struct luaPropertiesCommon *item, uint8_t arg)
+{
+  UNUSED(arg);
+  int16_t value;
+  const int index = findFlightControlPidIndex(item, luaFlightControlRatePid, FC_PID_TERM_COUNT);
+  if (index >= 0 && luaGetUpdateValueInt16(&value))
+  {
+    config.SetFlightControlRatePid(index, value);
+  }
+}
+
+static void luaparamFlightControlAnglePid(struct luaPropertiesCommon *item, uint8_t arg)
+{
+  UNUSED(arg);
+  int16_t value;
+  const int index = findFlightControlPidIndex(item, luaFlightControlAnglePid, FC_PID_TERM_COUNT);
+  if (index >= 0 && luaGetUpdateValueInt16(&value))
+  {
+    config.SetFlightControlAnglePid(index, value);
+  }
+}
+
+static void luaparamFlightControlSave(struct luaPropertiesCommon *item, uint8_t arg)
+{
+  luaCmdStep_e newStep;
+  const char *msg;
+
+  if (arg == lcsClick)
+  {
+    newStep = lcsAskConfirm;
+    msg = "Save FC params?";
+  }
+  else if (arg == lcsConfirmed)
+  {
+    if (config.IsFlightControlModified())
+    {
+      config.CommitFlightControlChanges();
+      newStep = lcsExecuting;
+      msg = "Saving...";
+    }
+    else
+    {
+      newStep = lcsIdle;
+      msg = "No changes";
+    }
+  }
+  else
+  {
+    newStep = lcsIdle;
+    msg = STR_EMPTYSPACE;
+  }
+
+  sendLuaCommandResponse((struct luaItem_command *)item, newStep, msg);
+}
+#endif
 
 #if defined(GPIO_PIN_PWM_OUTPUTS)
 static void luaparamMappingChannelOut(struct luaPropertiesCommon *item, uint8_t arg)
@@ -584,6 +726,25 @@ static void registerLuaParameters()
     config.SetTeamracePosition(arg);
   }, luaTeamraceFolder.common.id);
 
+#if defined(HAS_BASIC_FLIGHT_CONTROL)
+  registerLUAParameter(&luaFlightControlFolder);
+  registerLUAParameter(&luaFlightControlAngleMode, [](struct luaPropertiesCommon* item, uint8_t arg) {
+    UNUSED(item);
+    config.SetFlightControlAngleMode(arg != 0);
+  }, luaFlightControlFolder.common.id);
+  registerLUAParameter(&luaFlightControlSave, &luaparamFlightControlSave, luaFlightControlFolder.common.id);
+  registerLUAParameter(&luaFlightControlRateFolder, nullptr, luaFlightControlFolder.common.id);
+  for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)
+  {
+    registerLUAParameter(&luaFlightControlRatePid[i], &luaparamFlightControlRatePid, luaFlightControlRateFolder.common.id);
+  }
+  registerLUAParameter(&luaFlightControlAngleFolder, nullptr, luaFlightControlFolder.common.id);
+  for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)
+  {
+    registerLUAParameter(&luaFlightControlAnglePid[i], &luaparamFlightControlAnglePid, luaFlightControlAngleFolder.common.id);
+  }
+#endif
+
 #if defined(GPIO_PIN_PWM_OUTPUTS)
   if (OPT_HAS_SERVO_OUTPUT)
   {
@@ -652,6 +813,15 @@ static int event()
   // Teamrace
   setLuaTextSelectionValue(&luaTeamraceChannel, config.GetTeamraceChannel() - AUX2);
   setLuaTextSelectionValue(&luaTeamracePosition, config.GetTeamracePosition());
+
+#if defined(HAS_BASIC_FLIGHT_CONTROL)
+  setLuaTextSelectionValue(&luaFlightControlAngleMode, config.GetFlightControlAngleMode() ? 1 : 0);
+  for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)
+  {
+    setLuaInt16Value(&luaFlightControlRatePid[i], config.GetFlightControlRatePid()[i]);
+    setLuaInt16Value(&luaFlightControlAnglePid[i], config.GetFlightControlAnglePid()[i]);
+  }
+#endif
 
 #if defined(GPIO_PIN_PWM_OUTPUTS)
   if (OPT_HAS_SERVO_OUTPUT)

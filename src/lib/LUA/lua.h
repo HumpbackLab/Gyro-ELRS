@@ -144,7 +144,11 @@ void luaRegisterDevicePingCallback(void (*callback)());
 void sendLuaCommandResponse(struct luaItem_command *cmd, luaCmdStep_e step, const char *message);
 
 extern void luaParamUpdateReq(uint8_t type, uint8_t index, uint8_t arg);
+#if defined(TARGET_RX)
+extern void luaParamUpdateReq(uint8_t type, uint8_t index, uint8_t arg, const uint8_t *data, uint8_t dataLen);
+#endif
 extern bool luaHandleUpdateParameter();
+bool luaGetUpdateValueInt16(int16_t *value);
 
 typedef void (*luaCallback)(struct luaPropertiesCommon *item, uint8_t arg);
 void registerLUAParameter(void *definition, luaCallback callback = nullptr, uint8_t parent = 0);

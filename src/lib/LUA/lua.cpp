@@ -26,6 +26,8 @@ static void (*devicePingCallback)() = nullptr;
 static uint8_t parameterType;
 static uint8_t parameterIndex;
 static uint8_t parameterArg;
+static uint8_t parameterData[4];
+static uint8_t parameterDataLength;
 static volatile bool UpdateParamReq = false;
 
 static luaItem_folder luaAgentLite = {
@@ -338,7 +340,35 @@ void luaParamUpdateReq(uint8_t type, uint8_t index, uint8_t arg)
   parameterType = type;
   parameterIndex = index;
   parameterArg = arg;
+  parameterData[0] = arg;
+  parameterDataLength = 1;
   UpdateParamReq = true;
+}
+
+#if defined(TARGET_RX)
+void luaParamUpdateReq(uint8_t type, uint8_t index, uint8_t arg, const uint8_t *data, uint8_t dataLen)
+{
+  parameterType = type;
+  parameterIndex = index;
+  parameterArg = arg;
+  parameterDataLength = min(dataLen, (uint8_t)sizeof(parameterData));
+  if (parameterDataLength != 0)
+  {
+    memcpy(parameterData, data, parameterDataLength);
+  }
+  UpdateParamReq = true;
+}
+#endif
+
+bool luaGetUpdateValueInt16(int16_t *value)
+{
+  if (parameterDataLength < 2 || value == nullptr)
+  {
+    return false;
+  }
+
+  *value = (int16_t)((parameterData[0] << 8) | parameterData[1]);
+  return true;
 }
 
 void registerLUAParameter(void *definition, luaCallback callback, uint8_t parent)
