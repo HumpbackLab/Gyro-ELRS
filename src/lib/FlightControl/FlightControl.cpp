@@ -3,6 +3,7 @@
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
 
 #include "common.h"
+#include "config.h"
 #include "crsf_protocol.h"
 #include "helpers.h"
 #include <Arduino.h>
@@ -197,46 +198,28 @@ void FlightControlRuntime::markChannelsAvailable()
 
 bool FlightControlRuntime::loadPidParameters()
 {
-    bool rateReady = false;
-#if defined(FC_RATE_PID) && defined(FC_RATE_PID_COUNT)
-    rateReady = loadPidBank(_rollRatePid, _pitchRatePid, _yawRatePid, FC_RATE_PID, FC_RATE_PID_COUNT);
-#endif
-#if defined(FC_PID) && defined(FC_PID_COUNT)
-    if (!rateReady)
-    {
-        rateReady = loadPidBank(_rollRatePid, _pitchRatePid, _yawRatePid, FC_PID, FC_PID_COUNT);
-    }
-#endif
-
-#if defined(FC_ANGLE_ENABLED)
-    _angleEnabled = FC_ANGLE_ENABLED;
-#else
-    _angleEnabled = false;
-#endif
+    const bool rateReady = loadPidBank(_rollRatePid, _pitchRatePid, _yawRatePid, config.GetFlightControlRatePid(), FC_PID_TERM_COUNT);
+    _angleEnabled = config.GetFlightControlAngleMode();
 
     if (!_angleEnabled)
     {
         return rateReady;
     }
 
-#if defined(FC_ANGLE_PID) && defined(FC_ANGLE_PID_COUNT)
-    const bool angleReady = loadPidBank(_rollAnglePid, _pitchAnglePid, _yawAnglePid, FC_ANGLE_PID, FC_ANGLE_PID_COUNT);
+    const bool angleReady = loadPidBank(_rollAnglePid, _pitchAnglePid, _yawAnglePid, config.GetFlightControlAnglePid(), FC_PID_TERM_COUNT);
     return rateReady && angleReady;
-#else
-    return false;
-#endif
 }
 
-bool FlightControlRuntime::loadPidBank(FlightControlPid &rollPid, FlightControlPid &pitchPid, FlightControlPid &yawPid, const float *pid, int count)
+bool FlightControlRuntime::loadPidBank(FlightControlPid &rollPid, FlightControlPid &pitchPid, FlightControlPid &yawPid, const int16_t *pid, int count)
 {
     if (!pid || count < FC_PID_AXES * FC_PID_COLUMNS)
     {
         return false;
     }
 
-    rollPid.set(pid[0], pid[1], pid[2], pid[3]);
-    pitchPid.set(pid[4], pid[5], pid[6], pid[7]);
-    yawPid.set(pid[8], pid[9], pid[10], pid[11]);
+    rollPid.set(pid[0] * 0.01f, pid[1] * 0.01f, pid[2] * 0.01f, pid[3] * 0.01f);
+    pitchPid.set(pid[4] * 0.01f, pid[5] * 0.01f, pid[6] * 0.01f, pid[7] * 0.01f);
+    yawPid.set(pid[8] * 0.01f, pid[9] * 0.01f, pid[10] * 0.01f, pid[11] * 0.01f);
     return true;
 }
 
@@ -255,6 +238,8 @@ void FlightControlRuntime::loadStickTargets(float &throttle, float &roll, float 
 
 void FlightControlRuntime::update(uint32_t nowUs)
 {
+    _pidReady = loadPidParameters();
+
     if (!ready() || connectionState != connected || !connectionHasModelMatch || !teamraceHasModelMatch)
     {
         reset();

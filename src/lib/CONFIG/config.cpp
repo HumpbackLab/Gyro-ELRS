@@ -728,6 +728,10 @@ void RxConfig::Load()
     // If version is current, all done
     if (version == RX_CONFIG_VERSION)
     {
+        memcpy(m_flightControlRatePidPending, m_config.flightControlRatePid, sizeof(m_flightControlRatePidPending));
+        memcpy(m_flightControlAnglePidPending, m_config.flightControlAnglePid, sizeof(m_flightControlAnglePidPending));
+        m_flightControlAngleModePending = m_config.flightControlAngleMode != 0;
+        m_flightControlModified = false;
         CheckUpdateFlashedUid(false);
         return;
     }
@@ -746,6 +750,11 @@ void RxConfig::Load()
     UpgradeEepromV5();
     UpgradeEepromV6();
     UpgradeEepromV7V8();
+    UpgradeEepromV9();
+    memcpy(m_flightControlRatePidPending, m_config.flightControlRatePid, sizeof(m_flightControlRatePidPending));
+    memcpy(m_flightControlAnglePidPending, m_config.flightControlAnglePid, sizeof(m_flightControlAnglePidPending));
+    m_flightControlAngleModePending = m_config.flightControlAngleMode != 0;
+    m_flightControlModified = false;
     m_config.version = RX_CONFIG_VERSION | RX_CONFIG_MAGIC;
     m_modified = true;
     Commit();
@@ -909,6 +918,41 @@ void RxConfig::UpgradeEepromV7V8()
     }
 }
 
+// ========================================================
+// V9 Upgrade
+
+void RxConfig::UpgradeEepromV9()
+{
+    v9_rx_config_t v9Config;
+    m_eeprom->Get(0, v9Config);
+
+    if ((v9Config.version & ~CONFIG_MAGIC_MASK) == 9)
+    {
+        memcpy(m_config.uid, v9Config.uid, sizeof(m_config.uid));
+        m_config.unused_padding = v9Config.unused_padding;
+        m_config.serial1Protocol = v9Config.serial1Protocol;
+        m_config.serial1Protocol_unused = v9Config.serial1Protocol_unused;
+        m_config.flash_discriminator = v9Config.flash_discriminator;
+        m_config.vbat.scale = v9Config.vbat.scale;
+        m_config.vbat.offset = v9Config.vbat.offset;
+        m_config.bindStorage = v9Config.bindStorage;
+        m_config.power = v9Config.power;
+        m_config.antennaMode = v9Config.antennaMode;
+        m_config.powerOnCounter = v9Config.powerOnCounter;
+        m_config.forceTlmOff = v9Config.forceTlmOff;
+        m_config.rateInitialIdx = v9Config.rateInitialIdx;
+        m_config.modelId = v9Config.modelId;
+        m_config.serialProtocol = v9Config.serialProtocol;
+        m_config.failsafeMode = v9Config.failsafeMode;
+        memcpy(m_config.pwmChannels, v9Config.pwmChannels, sizeof(m_config.pwmChannels));
+        m_config.teamraceChannel = v9Config.teamraceChannel;
+        m_config.teamracePosition = v9Config.teamracePosition;
+        m_config.teamracePitMode = v9Config.teamracePitMode;
+        m_config.targetSysId = v9Config.targetSysId;
+        m_config.sourceSysId = v9Config.sourceSysId;
+    }
+}
+
 void RxConfig::UpgradeUid(uint8_t *onLoanUid, uint8_t *boundUid)
 {
     // Convert to traditional binding
@@ -1067,6 +1111,21 @@ RxConfig::SetAntennaMode(uint8_t antennaMode)
 void
 RxConfig::SetDefaults(bool commit)
 {
+    auto loadPidDefaults = [](int16_t *dest, const float *src, int count)
+    {
+        memset(dest, 0, sizeof(int16_t) * FC_PID_TERM_COUNT);
+        if (!src || count < FC_PID_TERM_COUNT)
+        {
+            return;
+        }
+
+        for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)
+        {
+            const float scaled = src[i] * 100.0f;
+            dest[i] = (int16_t)(scaled >= 0.0f ? scaled + 0.5f : scaled - 0.5f);
+        }
+    };
+
     // Reset everything to 0/false and then just set anything that zero is not appropriate
     memset(&m_config, 0, sizeof(m_config));
 
@@ -1119,6 +1178,25 @@ RxConfig::SetDefaults(bool commit)
 #if defined(RCVR_INVERT_TX)
     m_config.serialProtocol = PROTOCOL_INVERTED_CRSF;
 #endif
+
+#if defined(FC_RATE_PID) && defined(FC_RATE_PID_COUNT)
+    loadPidDefaults(m_config.flightControlRatePid, FC_RATE_PID, FC_RATE_PID_COUNT);
+#elif defined(FC_PID) && defined(FC_PID_COUNT)
+    loadPidDefaults(m_config.flightControlRatePid, FC_PID, FC_PID_COUNT);
+#endif
+
+#if defined(FC_ANGLE_PID) && defined(FC_ANGLE_PID_COUNT)
+    loadPidDefaults(m_config.flightControlAnglePid, FC_ANGLE_PID, FC_ANGLE_PID_COUNT);
+#endif
+
+#if defined(FC_ANGLE_ENABLED)
+    m_config.flightControlAngleMode = FC_ANGLE_ENABLED ? 1 : 0;
+#endif
+
+    memcpy(m_flightControlRatePidPending, m_config.flightControlRatePid, sizeof(m_flightControlRatePidPending));
+    memcpy(m_flightControlAnglePidPending, m_config.flightControlAnglePid, sizeof(m_flightControlAnglePidPending));
+    m_flightControlAngleModePending = m_config.flightControlAngleMode != 0;
+    m_flightControlModified = false;
 
     if (commit)
     {
@@ -1251,6 +1329,57 @@ void RxConfig::SetBindStorage(rx_config_bindstorage_t value)
         m_config.bindStorage = value;
         m_modified = true;
     }
+}
+
+void RxConfig::SetFlightControlRatePid(uint8_t index, int16_t value)
+{
+    if (index >= FC_PID_TERM_COUNT)
+    {
+        return;
+    }
+
+    if (m_flightControlRatePidPending[index] != value)
+    {
+        m_flightControlRatePidPending[index] = value;
+        m_flightControlModified = true;
+    }
+}
+
+void RxConfig::SetFlightControlAnglePid(uint8_t index, int16_t value)
+{
+    if (index >= FC_PID_TERM_COUNT)
+    {
+        return;
+    }
+
+    if (m_flightControlAnglePidPending[index] != value)
+    {
+        m_flightControlAnglePidPending[index] = value;
+        m_flightControlModified = true;
+    }
+}
+
+void RxConfig::SetFlightControlAngleMode(bool enabled)
+{
+    if (m_flightControlAngleModePending != enabled)
+    {
+        m_flightControlAngleModePending = enabled;
+        m_flightControlModified = true;
+    }
+}
+
+void RxConfig::CommitFlightControlChanges()
+{
+    if (!m_flightControlModified)
+    {
+        return;
+    }
+
+    memcpy(m_config.flightControlRatePid, m_flightControlRatePidPending, sizeof(m_config.flightControlRatePid));
+    memcpy(m_config.flightControlAnglePid, m_flightControlAnglePidPending, sizeof(m_config.flightControlAnglePid));
+    m_config.flightControlAngleMode = m_flightControlAngleModePending ? 1 : 0;
+    m_flightControlModified = false;
+    m_modified = true;
 }
 
 void RxConfig::SetTargetSysId(uint8_t value)
