@@ -260,7 +260,22 @@ button:disabled {
   width: 100%;
 }
 
+.grid-table select {
+  background: #fff;
+  border: 0;
+  border-radius: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  text-align: center;
+  width: 100%;
+}
+
 .grid-table input:disabled {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.grid-table select:disabled {
   background: #f3f4f6;
   color: #6b7280;
 }
@@ -328,6 +343,51 @@ button:disabled {
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.pwm-help {
+  margin-bottom: 14px;
+}
+
+.pwm-table th,
+.pwm-table td {
+  vertical-align: middle;
+}
+
+.pwm-table td:nth-child(2) {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.pwm-badges {
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.feature-tx {
+  background: #d8eef9;
+  color: #31576b;
+}
+
+.feature-rx {
+  background: #e5f5d1;
+  color: #49612d;
+}
+
+.feature-i2c {
+  background: #f9e0d8;
+  color: #744539;
+}
+
+.feature-serial2 {
+  background: #d7e9fb;
+  color: #335e84;
+}
+
+.feature-dshot {
+  background: #ece3fb;
+  color: #5e3a88;
 }
 
 /* ---- Board Orientation / Euler ---- */
@@ -490,5 +550,9 @@ button:disabled {
     display: inline-block;
     margin-right: 4px;
     width: auto;
+  }
+
+  .pwm-table {
+    min-width: 900px;
   }
 }

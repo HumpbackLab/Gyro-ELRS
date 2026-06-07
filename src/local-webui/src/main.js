@@ -26,6 +26,7 @@ const tabs = [
   ['status', 'Status'],
   ['runtime', 'Runtime'],
   ['model', 'Model'],
+  ['pwm', 'PWM'],
   ['flight', 'Flight'],
   ['hardware', 'Hardware JSON'],
   ['wifi', 'WiFi'],
@@ -41,6 +42,62 @@ const serialProtocols = [
   ['5', 'DJI RS Pro'],
   ['6', 'HoTT Telemetry'],
   ['7', 'MAVLINK'],
+];
+
+const serial1Protocols = [
+  ['0', 'Off'],
+  ['1', 'CRSF'],
+  ['2', 'Inverted CRSF'],
+  ['3', 'SBUS'],
+  ['4', 'Inverted SBUS'],
+  ['5', 'SUMD'],
+  ['6', 'DJI RS Pro'],
+  ['7', 'HoTT Telemetry'],
+  ['8', 'Tramp'],
+  ['9', 'SmartAudio'],
+];
+
+const pwmModes = [
+  '50Hz',
+  '60Hz',
+  '100Hz',
+  '160Hz',
+  '333Hz',
+  '400Hz',
+  '10KHzDuty',
+  'On/Off',
+  'DShot',
+  'Serial RX',
+  'Serial TX',
+  'I2C SCL',
+  'I2C SDA',
+  'Serial2 RX',
+  'Serial2 TX',
+];
+
+const pwmInputLabels = [
+  'ch1',
+  'ch2',
+  'ch3',
+  'ch4',
+  'ch5 (AUX1)',
+  'ch6 (AUX2)',
+  'ch7 (AUX3)',
+  'ch8 (AUX4)',
+  'ch9 (AUX5)',
+  'ch10 (AUX6)',
+  'ch11 (AUX7)',
+  'ch12 (AUX8)',
+  'ch13 (AUX9)',
+  'ch14 (AUX10)',
+  'ch15 (AUX11)',
+  'ch16 (AUX12)',
+];
+
+const pwmFailsafeModes = [
+  'Set Position',
+  'No Pulses',
+  'Last Position',
 ];
 
 const bindStorage = [
@@ -159,6 +216,10 @@ function checked(value) {
   return value ? 'checked' : '';
 }
 
+function disabled(value) {
+  return value ? 'disabled' : '';
+}
+
 function bytesToList(value) {
   return Array.isArray(value) ? value.map((item) => Number(item) || 0) : [];
 }
@@ -258,6 +319,79 @@ function parseNumberList(value) {
   if (!trimmed) return undefined;
   const parsed = trimmed.split(/[\s,]+/).filter(Boolean).map(Number);
   return parsed.some((item) => Number.isNaN(item)) ? null : parsed;
+}
+
+function pwmEntries() {
+  return Array.isArray(config().pwm) ? config().pwm : [];
+}
+
+function pwmAvailable() {
+  return pwmEntries().length > 0;
+}
+
+function decodePwmConfig(rawValue) {
+  const raw = Number(rawValue) || 0;
+  return {
+    failsafe: (raw & 1023) + 988,
+    inputChannel: (raw >> 10) & 15,
+    inverted: ((raw >> 14) & 1) === 1,
+    mode: (raw >> 15) & 15,
+    narrow: ((raw >> 19) & 1) === 1,
+    failsafeMode: (raw >> 20) & 3,
+    signalPolarityInverted: ((raw >> 22) & 1) === 1,
+  };
+}
+
+function encodePwmConfig(decoded) {
+  const failsafe = Math.max(988, Math.min(2011, intOrDefault(decoded.failsafe, 1500)));
+  const inputChannel = Math.max(0, Math.min(15, intOrDefault(decoded.inputChannel, 0)));
+  const mode = Math.max(0, Math.min(15, intOrDefault(decoded.mode, 0)));
+  const failsafeMode = Math.max(0, Math.min(3, intOrDefault(decoded.failsafeMode, 0)));
+  const invert = decoded.inverted ? 1 : 0;
+  const narrow = decoded.narrow ? 1 : 0;
+  const signalPolarityInverted = decoded.signalPolarityInverted ? 1 : 0;
+  return (signalPolarityInverted << 22) | (narrow << 19) | (failsafeMode << 20) | (mode << 15) | (invert << 14) | (inputChannel << 10) | (failsafe - 988);
+}
+
+function pwmModeAllowed(features, mode) {
+  if (mode >= 0 && mode <= 7) return true;
+  if (mode === 8) return (features & 16) !== 0;
+  if (mode === 9) return (features & 2) !== 0;
+  if (mode === 10) return (features & 1) !== 0;
+  if (mode === 11) return (features & 4) !== 0;
+  if (mode === 12) return (features & 8) !== 0;
+  if (mode === 13) return (features & 32) !== 0;
+  if (mode === 14) return (features & 64) !== 0;
+  return false;
+}
+
+function pwmFeatureBadges(features) {
+  const badges = [];
+  if (features & 1) badges.push(['TX', 'feature-tx']);
+  else if (features & 2) badges.push(['RX', 'feature-rx']);
+
+  if ((features & 12) === 12) badges.push(['I2C', 'feature-i2c']);
+  else if (features & 4) badges.push(['SCL', 'feature-i2c']);
+  else if (features & 8) badges.push(['SDA', 'feature-i2c']);
+
+  if ((features & 96) === 96) badges.push(['Serial2', 'feature-serial2']);
+  else if (features & 32) badges.push(['RX2', 'feature-serial2']);
+  else if (features & 64) badges.push(['TX2', 'feature-serial2']);
+
+  if (features & 16) badges.push(['DShot', 'feature-dshot']);
+
+  return badges.map(([label, css]) => `<span class="badge ${css}">${label}</span>`).join('');
+}
+
+function renderPwmModeOptions(features, selectedMode) {
+  return pwmModes.map((label, mode) => {
+    if (!pwmModeAllowed(features, mode)) return '';
+    return `<option value="${mode}" ${selected(selectedMode, mode)}>${label}</option>`;
+  }).join('');
+}
+
+function pwmSerial2Active() {
+  return pwmEntries().some((entry) => decodePwmConfig(entry.config).mode === 14);
 }
 
 function uidBytesFromText(text) {
@@ -426,6 +560,48 @@ async function saveModel(event) {
   }, 'Model configuration saved');
 }
 
+async function savePwm(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const entries = pwmEntries();
+  const usedExclusiveModes = new Map();
+  const nextPwm = entries.map((entry, index) => {
+    const mode = intOrDefault(form.elements[`pwm-mode-${index}`]?.value, 0);
+    const decoded = {
+      mode,
+      inputChannel: intOrDefault(form.elements[`pwm-input-${index}`]?.value, 0),
+      inverted: form.elements[`pwm-invert-${index}`]?.checked,
+      signalPolarityInverted: form.elements[`pwm-polarity-${index}`]?.checked,
+      narrow: form.elements[`pwm-narrow-${index}`]?.checked,
+      failsafeMode: intOrDefault(form.elements[`pwm-failsafe-mode-${index}`]?.value, 0),
+      failsafe: intOrDefault(form.elements[`pwm-failsafe-${index}`]?.value, 1500),
+    };
+    if (mode > 9) {
+      if (usedExclusiveModes.has(mode)) {
+        throw new Error(`${pwmModes[mode]} is already assigned to output ${usedExclusiveModes.get(mode)}`);
+      }
+      usedExclusiveModes.set(mode, index + 1);
+    }
+    return encodePwmConfig(decoded);
+  });
+
+  const payload = {
+    ...config(),
+    pwm: nextPwm,
+    'serial1-protocol': pwmSerial2Active() ? configValue('serial1-protocol', 0) : 0,
+  };
+
+  const serial2Input = form.elements['serial1-protocol'];
+  if (serial2Input) {
+    payload['serial1-protocol'] = intOrDefault(serial2Input.value, 0);
+  }
+
+  await runBusy(async () => {
+    await apiFetch('/config', {method: 'POST', body: JSON.stringify(payload)});
+    await loadDevice();
+  }, 'PWM configuration saved');
+}
+
 async function saveFlight(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -562,6 +738,72 @@ function renderModel() {
         <div class="row"><label for="sbus-failsafe">SBUS Failsafe</label><select id="sbus-failsafe" name="sbus-failsafe"><option value="0" ${selected(configValue('sbus-failsafe', modelDefaults['sbus-failsafe']), 0)}>No Pulses</option><option value="1" ${selected(configValue('sbus-failsafe', modelDefaults['sbus-failsafe']), 1)}>Last Position</option></select></div>
         <div class="check"><input id="force-tlm" name="force-tlm" type="checkbox" ${checked(configValue('force-tlm', modelDefaults['force-tlm']))}><label for="force-tlm">Force telemetry off</label></div>
         <div class="actions"><button class="primary" ${state.busy ? 'disabled' : ''}>Save</button><button class="danger" type="button" data-action="reset-model">Reset Model</button></div>
+      </form>
+    </section>`;
+}
+
+function renderPwm() {
+  const entries = pwmEntries();
+  if (!entries.length) {
+    return `
+      <section class="panel">
+        <h2>PWM</h2>
+        <div class="notice">This target does not expose PWM outputs through <code>/config</code>.</div>
+      </section>`;
+  }
+
+  const serial2Visible = pwmSerial2Active();
+  return `
+    <section class="panel">
+      <h2>PWM Output</h2>
+      <div class="helper pwm-help">
+        Configure each receiver output pin mode, source channel, inversion, pulse width and failsafe. <code>Invert</code> mirrors the control value around <code>1500us</code>. <code>Polarity</code> stores the raw signal-polarity flag; whether it has an effect depends on the current platform and output mode. Modes above <code>Serial RX/TX</code> are exclusive and can only be assigned once.
+      </div>
+      <form id="pwm-form">
+        <div class="table-shell">
+          <table class="grid-table pwm-table">
+            <thead>
+              <tr>
+                <th>Output</th>
+                <th>Pin</th>
+                <th>Features</th>
+                <th>Mode</th>
+                <th>Input</th>
+                <th>Invert</th>
+                <th>PolarityInvert</th>
+                <th>750us</th>
+                <th>Failsafe</th>
+                <th>Position</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${entries.map((entry, index) => {
+                const decoded = decodePwmConfig(entry.config);
+                const disabledRow = decoded.mode > 9;
+                const failsafeDisabled = disabledRow || decoded.failsafeMode !== 0;
+                return `
+                  <tr data-pwm-row="${index}">
+                    <th scope="row">${index + 1}</th>
+                    <td>${escapeHtml(entry.pin)}</td>
+                    <td><div class="badge-row pwm-badges">${pwmFeatureBadges(entry.features)}</div></td>
+                    <td><select name="pwm-mode-${index}" data-pwm-mode="${index}">${renderPwmModeOptions(entry.features, decoded.mode)}</select></td>
+                    <td><select name="pwm-input-${index}" data-pwm-dependent="${index}">${pwmInputLabels.map((label, value) => `<option value="${value}" ${selected(decoded.inputChannel, value)}>${label}</option>`).join('')}</select></td>
+                    <td><input name="pwm-invert-${index}" type="checkbox" data-pwm-dependent="${index}" ${checked(decoded.inverted)} ${disabled(disabledRow)}></td>
+                    <td><input name="pwm-polarity-${index}" type="checkbox" data-pwm-polarity="${index}" ${checked(decoded.signalPolarityInverted)}></td>
+                    <td><input name="pwm-narrow-${index}" type="checkbox" data-pwm-dependent="${index}" ${checked(decoded.narrow)} ${disabled(disabledRow)}></td>
+                    <td><select name="pwm-failsafe-mode-${index}" data-pwm-failsafe-mode="${index}" data-pwm-dependent="${index}" ${disabled(disabledRow)}>${pwmFailsafeModes.map((label, value) => `<option value="${value}" ${selected(decoded.failsafeMode, value)}>${label}</option>`).join('')}</select></td>
+                    <td><input name="pwm-failsafe-${index}" type="number" min="988" max="2011" value="${escapeHtml(decoded.failsafe)}" data-pwm-failsafe="${index}" data-pwm-dependent="${index}" ${disabled(failsafeDisabled)}></td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="row" id="serial1-config-row" style="display:${serial2Visible ? 'grid' : 'none'};">
+          <label for="serial1-protocol">Serial2 Protocol</label>
+          <select id="serial1-protocol" name="serial1-protocol">${serial1Protocols.map(([value, label]) => `<option value="${value}" ${selected(configValue('serial1-protocol', 0), value)}>${label}</option>`).join('')}</select>
+          <div class="helper">Shown when any output is assigned to <code>Serial2 TX</code>.</div>
+        </div>
+        <div class="actions"><button class="primary" ${state.busy ? 'disabled' : ''}>Save</button><button class="secondary" type="button" data-action="refresh">Refresh</button></div>
       </form>
     </section>`;
 }
@@ -751,6 +993,7 @@ function renderCurrentTab() {
     status: renderStatus,
     runtime: renderRuntime,
     model: renderModel,
+    pwm: renderPwm,
     flight: renderFlight,
     hardware: renderHardwareJson,
     wifi: renderWifi,
@@ -802,6 +1045,71 @@ function wireOrientationPreview() {
   });
 }
 
+function wirePwmForm() {
+  const form = document.querySelector('#pwm-form');
+  if (!form) return;
+
+  const rows = pwmEntries().map((entry, index) => ({entry, index}));
+
+  function syncExclusiveOptions() {
+    const selectedModes = new Map();
+    rows.forEach(({index}) => {
+      const modeInput = form.elements[`pwm-mode-${index}`];
+      if (!modeInput) return;
+      const mode = intOrDefault(modeInput.value, 0);
+      if (mode > 9) selectedModes.set(mode, index);
+    });
+
+    rows.forEach(({index}) => {
+      const modeInput = form.elements[`pwm-mode-${index}`];
+      if (!modeInput) return;
+      Array.from(modeInput.options).forEach((option) => {
+        const mode = intOrDefault(option.value, -1);
+        const owner = selectedModes.get(mode);
+        option.disabled = mode > 9 && owner !== undefined && owner !== index;
+      });
+    });
+  }
+
+  function syncRow(index) {
+    const modeInput = form.elements[`pwm-mode-${index}`];
+    const failsafeModeInput = form.elements[`pwm-failsafe-mode-${index}`];
+    const failsafeInput = form.elements[`pwm-failsafe-${index}`];
+    const polarityInput = form.elements[`pwm-polarity-${index}`];
+    if (!modeInput || !failsafeModeInput || !failsafeInput) return;
+    const mode = intOrDefault(modeInput.value, 0);
+    const serialMode = mode > 9;
+    form.querySelectorAll(`[data-pwm-dependent="${index}"]`).forEach((input) => {
+      if (input === failsafeInput) return;
+      input.disabled = serialMode;
+    });
+    if (polarityInput) polarityInput.disabled = false;
+    failsafeInput.disabled = serialMode || intOrDefault(failsafeModeInput.value, 0) !== 0;
+  }
+
+  function syncSerial2Visibility() {
+    const row = document.querySelector('#serial1-config-row');
+    if (!row) return;
+    const visible = rows.some(({index}) => intOrDefault(form.elements[`pwm-mode-${index}`]?.value, 0) === 14);
+    row.style.display = visible ? 'grid' : 'none';
+  }
+
+  rows.forEach(({index}) => {
+    form.elements[`pwm-mode-${index}`]?.addEventListener('change', () => {
+      syncExclusiveOptions();
+      syncRow(index);
+      syncSerial2Visibility();
+    });
+    form.elements[`pwm-failsafe-mode-${index}`]?.addEventListener('change', () => {
+      syncRow(index);
+    });
+    syncRow(index);
+  });
+
+  syncExclusiveOptions();
+  syncSerial2Visibility();
+}
+
 function render() {
   document.querySelector('#app').innerHTML = `
     <div class="app">
@@ -848,6 +1156,7 @@ function wireEvents() {
 
   document.querySelector('#runtime-form')?.addEventListener('submit', saveRuntime);
   document.querySelector('#model-form')?.addEventListener('submit', saveModel);
+  document.querySelector('#pwm-form')?.addEventListener('submit', savePwm);
   document.querySelector('#flight-form')?.addEventListener('submit', saveFlight);
   document.querySelector('#hardware-form')?.addEventListener('submit', saveHardwareJson);
   document.querySelector('#wifi-form')?.addEventListener('submit', saveHomeNetwork);
@@ -904,6 +1213,7 @@ function wireEvents() {
 
   syncBindingPreview();
   wireOrientationPreview();
+  wirePwmForm();
 
   document.querySelectorAll('[data-action]').forEach((button) => {
     button.addEventListener('click', () => {
