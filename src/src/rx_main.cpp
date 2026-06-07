@@ -34,6 +34,7 @@
 #include "devButton.h"
 #include "devServoOutput.h"
 #include "devFlightControl.h"
+#include "devGyro.h"
 #include "devVTXSPI.h"
 #include "devAnalogVbat.h"
 #include "devSerialUpdate.h"
@@ -105,6 +106,9 @@ device_affinity_t ui_devices[] = {
 #endif
 #ifdef HAS_SERVO_OUTPUT
   {&ServoOut_device, 1},
+#endif
+#ifdef HAS_GYRO
+  {&Gyro_device, 0},
 #endif
 #if defined(HAS_BASIC_FLIGHT_CONTROL)
   {&FlightControl_device, 1},
@@ -1290,10 +1294,13 @@ void MspReceiveComplete()
         default:
             if ((receivedHeader->dest_addr == CRSF_ADDRESS_BROADCAST || receivedHeader->dest_addr == CRSF_ADDRESS_CRSF_RECEIVER))
             {
+                const uint8_t valueLen = MspData[CRSF_TELEMETRY_LENGTH_INDEX] > 5U ? MspData[CRSF_TELEMETRY_LENGTH_INDEX] - 5U : 0U;
                 luaParamUpdateReq(
                     MspData[CRSF_TELEMETRY_TYPE_INDEX],
                     MspData[CRSF_TELEMETRY_FIELD_ID_INDEX],
-                    MspData[CRSF_TELEMETRY_FIELD_CHUNK_INDEX]
+                    MspData[CRSF_TELEMETRY_FIELD_CHUNK_INDEX],
+                    &MspData[CRSF_TELEMETRY_FIELD_CHUNK_INDEX],
+                    valueLen
                 );
             }
             break;
