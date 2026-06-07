@@ -73,15 +73,33 @@ static void servoWrite(uint8_t ch, uint16_t us)
         pwmChannelValues[ch] = us;
         if ((eServoOutputMode)chConfig->val.mode == somOnOff)
         {
-            digitalWrite(servoPins[ch], us > 1500);
+            bool high = us > 1500;
+            if (chConfig->val.signalPolarityInverted)
+            {
+                high = !high;
+            }
+            digitalWrite(servoPins[ch], high);
         }
         else if ((eServoOutputMode)chConfig->val.mode == som10KHzDuty)
         {
-            PWM.setDuty(pwmChannels[ch], constrain(us, 1000, 2000) - 1000);
+            uint16_t duty = constrain(us, 1000, 2000) - 1000;
+            if (chConfig->val.signalPolarityInverted)
+            {
+                duty = 1000U - duty;
+            }
+            PWM.setDuty(pwmChannels[ch], duty);
         }
         else
         {
-            PWM.setMicroseconds(pwmChannels[ch], us / (chConfig->val.narrow + 1));
+            const uint16_t pulseUs = us / (chConfig->val.narrow + 1);
+            if (chConfig->val.signalPolarityInverted)
+            {
+                PWM.setMicrosecondsPolarityInverted(pwmChannels[ch], pulseUs);
+            }
+            else
+            {
+                PWM.setMicroseconds(pwmChannels[ch], pulseUs);
+            }
         }
     }
 }

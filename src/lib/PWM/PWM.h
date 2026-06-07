@@ -37,6 +37,8 @@ public:
      * @param microseconds the high time in microseconds
      */
     void setMicroseconds(pwm_channel_t channel, uint16_t microseconds);
+
+    void setMicrosecondsPolarityInverted(pwm_channel_t channel, uint16_t microseconds);
 };
 
 extern PWMController PWM;

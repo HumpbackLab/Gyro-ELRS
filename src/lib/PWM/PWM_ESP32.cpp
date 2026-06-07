@@ -246,4 +246,10 @@ void PWMController::setMicroseconds(pwm_channel_t channel, uint16_t microseconds
 #endif
 }
 
+void PWMController::setMicrosecondsPolarityInverted(pwm_channel_t channel, uint16_t microseconds)
+{
+    // Polarity-inverted pulse output is not implemented on ESP32 yet.
+    // Fall back to the normal pulse shape so callers do not get a silent no-op.
+    setMicroseconds(channel, microseconds);
+}
 #endif
