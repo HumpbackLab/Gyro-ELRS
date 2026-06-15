@@ -29,4 +29,8 @@ extern device_t Gyro_device;
 bool GyroIsInitialized();
 bool GyroGetSample(GyroSample &sample);
 
+// Diagnostic message buffer for web UI status page
+void GyroDiagPrintf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+const char *GyroGetDiagMsg();
+
 #endif

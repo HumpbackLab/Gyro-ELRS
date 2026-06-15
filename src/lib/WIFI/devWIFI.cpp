@@ -50,6 +50,7 @@
 #include "helpers.h"
 #include "devVTXSPI.h"
 #include "devButton.h"
+#include "devGyro.h"
 
 #if !defined(LOCAL_WEBUI)
 #include "WebContent.h"
@@ -603,6 +604,10 @@ static void WebUpdateGetTarget(AsyncWebServerRequest *request)
 #if defined(RADIO_LR1121)
   json["radio-type"] = "LR1121";
   json["has-sub-ghz"] = true;
+#endif
+#if defined(HAS_GYRO)
+  json["has-gyro"] = GyroIsInitialized();
+  json["gyro-msg"] = GyroGetDiagMsg();
 #endif
 
   AsyncResponseStream *response = request->beginResponseStream("application/json");
@@ -1355,7 +1360,7 @@ static int timeout()
     return DURATION_IMMEDIATELY;
   }
   #elif defined(TARGET_RX)
-  if (firmwareOptions.wifi_auto_on_interval != -1 && !webserverPreventAutoStart && (connectionState == disconnected))
+  if (firmwareOptions.wifi_auto_on_interval != -1 && !webserverPreventAutoStart && (connectionState == disconnected || connectionState == radioFailed))
   {
     static bool pastAutoInterval = false;
     // If InBindingMode then wait at least 60 seconds before going into wifi,

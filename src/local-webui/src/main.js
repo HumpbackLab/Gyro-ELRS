@@ -776,6 +776,10 @@ function renderStatus() {
         <div class="metric"><span>Serial Protocol</span><strong>${escapeHtml(serialProtocols.find(([v]) => v === String(c['serial-protocol']))?.[1] || c['serial-protocol'] || 'CRSF')}</strong></div>
         <div class="metric"><span>Flight Angle Loop</span><strong>${h.fc_angle_enabled ? 'Enabled' : 'Disabled'}</strong></div>
       </section>
+      <section class="panel">
+        <h2>Sensors</h2>
+        <div class="metric"><span>Gyro</span><strong>${state.target?.['has-gyro'] ? 'Detected' : 'Not detected'}</strong>${state.target?.['gyro-msg'] ? `<div class="diag-msg">${escapeHtml(state.target['gyro-msg']).replace(/\n/g, '<br>')}</div>` : ''}</div>
+      </section>
     </div>`;
 }
 

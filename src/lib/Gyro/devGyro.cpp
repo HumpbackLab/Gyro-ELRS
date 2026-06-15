@@ -4,6 +4,7 @@
 
 #include <Arduino.h>
 #include "logging.h"
+#include "gyro_sc7u22.h"
 
 #define GYRO_STARTUP_INTERVAL 100
 
@@ -11,15 +12,37 @@ static GyroBase *gyro;
 static eGyroReadState GyroReadState;
 static GyroSample latestSample = {};
 static bool latestSampleValid = false;
+static String gyroDiagMsg;
 
 extern bool i2c_enabled;
+
+void GyroDiagPrintf(const char *fmt, ...)
+{
+    char buf[160];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    if (gyroDiagMsg.length() > 0) gyroDiagMsg += '\n';
+    gyroDiagMsg += buf;
+}
+
+const char *GyroGetDiagMsg()
+{
+    return gyroDiagMsg.c_str();
+}
 
 static bool Gyro_Detect()
 {
 #if defined(USE_I2C)
     if (i2c_enabled)
     {
-        // Future I2C gyro backends are detected here.
+        if (Gyro_SC7U22::detect())
+        {
+            gyro = new Gyro_SC7U22();
+            return true;
+        }
+        // Additional I2C gyro backends can be added here.
     }
 #endif
     return false;
@@ -35,6 +58,7 @@ static int Gyro_Init()
         return DURATION_IMMEDIATELY;
     }
 
+    GyroDiagPrintf("Init failed, retrying...");
     return GYRO_STARTUP_INTERVAL;
 }
 
@@ -79,11 +103,6 @@ static int start()
 
 static int timeout()
 {
-    if (connectionState >= MODE_STATES)
-    {
-        return DURATION_NEVER;
-    }
-
     switch (GyroReadState)
     {
         default:
