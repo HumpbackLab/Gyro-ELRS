@@ -160,9 +160,9 @@ void Gyro_SC7U22::initialize()
 
 uint8_t Gyro_SC7U22::getGyroDuration()
 {
-    // At 1600Hz ODR, each sample takes ~625us. The I2C read itself
-    // completes quickly (sub-millisecond). Return 0 for instant read.
-    return 0;
+    // 250Hz gyro poll rate (4ms). I2C read takes ~400us at 400kHz,
+    // leaving ~3.6ms per cycle for WiFi, PWM, and FC computation.
+    return 4;
 }
 
 void Gyro_SC7U22::startGyro()

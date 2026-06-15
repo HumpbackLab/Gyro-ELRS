@@ -40,7 +40,7 @@ static int timeout()
     // Trigger servo update after flight control produces new mixer output,
     // so PWM works even without RC packets (e.g. WiFi debug mode).
     servoNewChannelsAvailable();
-    return DURATION_IMMEDIATELY;
+    return 4; // 250Hz, matched to FC_UPDATE_INTERVAL_US
 }
 
 device_t FlightControl_device = {
