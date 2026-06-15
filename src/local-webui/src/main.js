@@ -379,8 +379,19 @@ function parseNumberList(value) {
   return parsed.some((item) => Number.isNaN(item)) ? null : parsed;
 }
 
+function pwmConnected() {
+  return !!state.target;
+}
+
 function pwmEntries() {
-  return Array.isArray(config().pwm) ? config().pwm : [];
+  const raw = Array.isArray(config().pwm) ? config().pwm : [];
+  if (raw.length > 0) return raw;
+  // Offline fallback: 8 dummy channels with default 50Hz config for UI development
+  if (!pwmConnected()) {
+    const dummy = []; for (let i = 0; i < 8; i++) dummy.push({config: 0, pin: i + 2, features: 0});
+    return dummy;
+  }
+  return [];
 }
 
 function pwmAvailable() {
@@ -624,6 +635,7 @@ async function saveModel(event) {
 
 async function savePwm(event) {
   event.preventDefault();
+  if (!pwmConnected()) return;
   const form = event.currentTarget;
   const entries = pwmEntries();
   const usedExclusiveModes = new Map();
@@ -829,6 +841,7 @@ function renderModel() {
 
 function renderPwm() {
   const entries = pwmEntries();
+  const offline = !pwmConnected();
   if (!entries.length) {
     return `
       <section class="panel">
@@ -841,6 +854,7 @@ function renderPwm() {
   return `
     <section class="panel">
       <h2>PWM Output</h2>
+      ${offline ? `<div class="notice">Not connected to a device. Showing offline preview with default values.</div>` : ''}
       <div class="helper pwm-help">
         Configure each receiver output pin mode, source channel, inversion, pulse width and failsafe. <code>Invert</code> mirrors the control value around <code>1500us</code>. <code>Polarity</code> stores the raw signal-polarity flag; whether it has an effect depends on the current platform and output mode. Modes above <code>Serial RX/TX</code> are exclusive and can only be assigned once.
       </div>
@@ -1202,15 +1216,18 @@ function wirePwmForm() {
 
   function syncRow(index) {
     const modeInput = form.elements[`pwm-mode-${index}`];
+    const sourceInput = form.elements[`pwm-source-${index}`];
     const failsafeModeInput = form.elements[`pwm-failsafe-mode-${index}`];
     const failsafeInput = form.elements[`pwm-failsafe-${index}`];
     const polarityInput = form.elements[`pwm-polarity-${index}`];
     if (!modeInput || !failsafeModeInput || !failsafeInput) return;
     const mode = intOrDefault(modeInput.value, 0);
+    const mixerMode = sourceInput ? intOrDefault(sourceInput.value, 0) === 1 : false;
     const serialMode = mode > 9;
     form.querySelectorAll(`[data-pwm-dependent="${index}"]`).forEach((input) => {
       if (input === failsafeInput) return;
-      input.disabled = serialMode;
+      const isInputCh = input.name && input.name.startsWith(`pwm-input-`);
+      input.disabled = serialMode || (mixerMode && isInputCh);
     });
     if (polarityInput) polarityInput.disabled = false;
     failsafeInput.disabled = serialMode || intOrDefault(failsafeModeInput.value, 0) !== 0;
@@ -1230,6 +1247,9 @@ function wirePwmForm() {
       syncSerial2Visibility();
     });
     form.elements[`pwm-failsafe-mode-${index}`]?.addEventListener('change', () => {
+      syncRow(index);
+    });
+    form.elements[`pwm-source-${index}`]?.addEventListener('change', () => {
       syncRow(index);
     });
     syncRow(index);
