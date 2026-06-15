@@ -51,6 +51,7 @@
 #include "devVTXSPI.h"
 #include "devButton.h"
 #include "devGyro.h"
+#include "devAnalogVbat.h"
 #include "devServoOutput.h"
 
 #if !defined(LOCAL_WEBUI)
@@ -609,6 +610,10 @@ static void WebUpdateGetTarget(AsyncWebServerRequest *request)
 #if defined(HAS_GYRO)
   json["has-gyro"] = GyroIsInitialized();
   json["gyro-msg"] = GyroGetDiagMsg();
+#endif
+#if defined(USE_ANALOG_VBAT)
+  json["has-vbat"] = true;
+  json["vbat-voltage"] = GetVbatVoltage();
 #endif
 
   AsyncResponseStream *response = request->beginResponseStream("application/json");

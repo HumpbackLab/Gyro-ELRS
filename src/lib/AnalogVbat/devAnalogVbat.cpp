@@ -18,6 +18,7 @@
 typedef uint16_t vbatAnalogStorage_t;
 static MedianAvgFilter<vbatAnalogStorage_t, VBAT_SMOOTH_CNT>vbatSmooth;
 static uint8_t vbatUpdateScale;
+static uint16_t vbatVoltage = 0;
 
 #if defined(PLATFORM_ESP32)
 #include "esp_adc_cal.h"
@@ -66,7 +67,7 @@ static int start()
     return VBAT_SAMPLE_INTERVAL;
 }
 
-static void reportVbat()
+static void updateVbat()
 {
     uint32_t adc = vbatSmooth.calc();
 #if defined(PLATFORM_ESP32) && !defined(DEBUG_VBAT_ADC)
@@ -81,9 +82,16 @@ static void reportVbat()
     else
         vbat = ((int32_t)adc - ANALOG_VBAT_OFFSET) * 100 / ANALOG_VBAT_SCALE;
 
+    vbatVoltage = (uint16_t)vbat;
+}
+
+static void reportVbat()
+{
+    updateVbat();
+
     CRSF_MK_FRAME_T(crsf_sensor_battery_t) crsfbatt = { 0 };
     // Values are MSB first (BigEndian)
-    crsfbatt.p.voltage = htobe16((uint16_t)vbat);
+    crsfbatt.p.voltage = htobe16(vbatVoltage);
     // No sensors for current, capacity, or remaining available
 
     CRSF::SetHeaderAndCrc((uint8_t *)&crsfbatt, CRSF_FRAMETYPE_BATTERY_SENSOR, CRSF_FRAME_SIZE(sizeof(crsf_sensor_battery_t)), CRSF_ADDRESS_CRSF_TRANSMITTER);
@@ -107,10 +115,19 @@ static int timeout()
 #endif
 
     unsigned int idx = vbatSmooth.add(adc);
-    if (idx == 0 && connectionState == connected)
-        reportVbat();
+    if (idx == 0)
+    {
+        updateVbat();
+        if (connectionState == connected)
+            reportVbat();
+    }
 
     return VBAT_SAMPLE_INTERVAL * vbatUpdateScale;
+}
+
+uint16_t GetVbatVoltage()
+{
+    return vbatVoltage;
 }
 
 device_t AnalogVbat_device = {

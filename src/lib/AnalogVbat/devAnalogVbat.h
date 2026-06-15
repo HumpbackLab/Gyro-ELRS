@@ -5,6 +5,7 @@
 
 #if defined(USE_ANALOG_VBAT)
 void Vbat_enableSlowUpdate(bool enable);
+uint16_t GetVbatVoltage();
 
 extern device_t AnalogVbat_device;
 #endif

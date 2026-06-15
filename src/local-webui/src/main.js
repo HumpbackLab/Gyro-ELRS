@@ -797,6 +797,7 @@ function renderStatus() {
       <section class="panel">
         <h2>Sensors</h2>
         <div class="metric"><span>Gyro</span><strong>${state.target?.['has-gyro'] ? 'Detected' : 'Not detected'}</strong>${state.target?.['gyro-msg'] ? `<div class="diag-msg">${escapeHtml(state.target['gyro-msg']).replace(/\n/g, '<br>')}</div>` : ''}</div>
+        ${state.target?.['has-vbat'] ? `<div class="metric"><span>VBAT</span><strong>${(state.target['vbat-voltage'] * 0.01).toFixed(2)} V</strong></div>` : ''}
       </section>
     </div>`;
 }
