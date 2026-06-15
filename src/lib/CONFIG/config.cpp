@@ -1218,19 +1218,21 @@ RxConfig::SetStorageProvider(ELRS_EEPROM *eeprom)
 
 #if defined(GPIO_PIN_PWM_OUTPUTS)
 void
-RxConfig::SetPwmChannel(uint8_t ch, uint16_t failsafe, uint8_t inputCh, bool inverted, uint8_t mode, bool narrow, bool signalPolarityInverted)
+RxConfig::SetPwmChannel(uint8_t ch, uint16_t failsafe, uint8_t inputCh, bool inverted, uint8_t mode, bool narrow, bool signalPolarityInverted, bool mixerMode)
 {
     if (ch > PWM_MAX_CHANNELS)
         return;
 
     rx_config_pwm_t *pwm = &m_config.pwmChannels[ch];
     rx_config_pwm_t newConfig;
+    newConfig.raw = 0;
     newConfig.val.failsafe = failsafe;
     newConfig.val.inputChannel = inputCh;
     newConfig.val.inverted = inverted;
     newConfig.val.mode = mode;
     newConfig.val.narrow = narrow;
     newConfig.val.signalPolarityInverted = signalPolarityInverted;
+    newConfig.val.mixerMode = mixerMode;
     if (pwm->raw == newConfig.raw)
         return;
 

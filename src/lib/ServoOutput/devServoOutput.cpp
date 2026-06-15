@@ -24,10 +24,27 @@ const uint8_t RMT_MAX_CHANNELS = 8;
 static bool newChannelsAvailable;
 // Absolute max failsafe time if no update is received, regardless of LQ
 static constexpr uint32_t FAILSAFE_ABS_TIMEOUT_MS = 1000U;
+// Simulated RC channel values for WiFi mode debugging (988-2012us)
+static uint16_t simulatedChannels[16] = {};
+static bool simulatedChannelsDirty = false;
 
 void ICACHE_RAM_ATTR servoNewChannelsAvailable()
 {
     newChannelsAvailable = true;
+}
+
+void servoSetSimulatedChannel(uint8_t ch, uint16_t us)
+{
+    if (ch < 16)
+    {
+        simulatedChannels[ch] = constrain(us, 988, 2012);
+        simulatedChannelsDirty = true;
+    }
+}
+
+uint16_t servoGetSimulatedChannel(uint8_t ch)
+{
+    return ch < 16 ? simulatedChannels[ch] : 0;
 }
 
 uint16_t servoOutputModeToFrequency(eServoOutputMode mode)
@@ -129,34 +146,44 @@ static void servosFailsafe()
 static void servosUpdate(unsigned long now)
 {
     static uint32_t lastUpdate;
-    if (newChannelsAvailable)
+    if (newChannelsAvailable || simulatedChannelsDirty)
     {
         newChannelsAvailable = false;
+        simulatedChannelsDirty = false;
         lastUpdate = now;
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
         const FlightControlMixerOutput &mixerOutput = flightControlGetMixerOutput();
 #endif
         for (int ch = 0 ; ch < GPIO_PIN_PWM_OUTPUTS_COUNT ; ++ch)
         {
+            const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
-            if (mixerOutput.motorCount > ch)
+            // Per-channel mixer mode: use flight control mixer output
+            if (chConfig->val.mixerMode)
             {
-                servoWrite(ch, mixerOutput.motorUs[ch]);
+                if (ch < mixerOutput.motorCount)
+                {
+                    servoWrite(ch, mixerOutput.motorUs[ch]);
+                }
                 continue;
             }
 #endif
-            const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
-            const unsigned crsfVal = ChannelData[chConfig->val.inputChannel];
-            // crsfVal might 0 if this is a switch channel, and it has not been
-            // received yet. Delay initializing the servo until the channel is valid
-            if (crsfVal == 0)
+            // Passthrough mode: use RC channel data (or WiFi simulated channels)
+            const uint8_t inputCh = chConfig->val.inputChannel;
+            uint16_t us;
+            if (connectionState == wifiUpdate && simulatedChannels[inputCh] != 0)
             {
-                continue;
+                us = simulatedChannels[inputCh];
             }
-
-            uint16_t us = CRSF_to_US(crsfVal);
-            // Flip the output around the mid-value if inverted
-            // (1500 - usOutput) + 1500
+            else
+            {
+                const unsigned crsfVal = ChannelData[inputCh];
+                if (crsfVal == 0)
+                {
+                    continue;
+                }
+                us = CRSF_to_US(crsfVal);
+            }
             if (chConfig->val.inverted)
             {
                 us = 3000U - us;

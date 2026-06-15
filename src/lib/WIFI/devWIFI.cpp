@@ -51,6 +51,7 @@
 #include "devVTXSPI.h"
 #include "devButton.h"
 #include "devGyro.h"
+#include "devServoOutput.h"
 
 #if !defined(LOCAL_WEBUI)
 #include "WebContent.h"
@@ -615,6 +616,35 @@ static void WebUpdateGetTarget(AsyncWebServerRequest *request)
   request->send(response);
 }
 
+static void WebUpdateGetChannels(AsyncWebServerRequest *request)
+{
+  JsonDocument json;
+  for (int i = 0; i < 16; i++)
+  {
+    json["channels"][i] = servoGetSimulatedChannel(i);
+  }
+  AsyncResponseStream *response = request->beginResponseStream("application/json");
+  serializeJson(json, *response);
+  request->send(response);
+}
+
+static void WebUpdateSetChannels(AsyncWebServerRequest *request)
+{
+  JsonDocument json;
+  DeserializationError error = deserializeJson(json, request->getParam(0)->value());
+  if (error)
+  {
+    request->send(400, "application/json", "{\"status\":\"error\",\"msg\":\"Invalid JSON\"}");
+    return;
+  }
+  JsonArray channels = json["channels"].as<JsonArray>();
+  for (uint8_t i = 0; i < channels.size() && i < 16; i++)
+  {
+    servoSetSimulatedChannel(i, channels[i]);
+  }
+  request->send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
 static void WebUpdateSendNetworks(AsyncWebServerRequest *request)
 {
   int numNetworks = WiFi.scanComplete();
@@ -1115,6 +1145,9 @@ static void startServices()
   server.on("/config", HTTP_OPTIONS, corsPreflightResponse);
   server.on("/access", WebUpdateAccessPoint);
   server.on("/target", WebUpdateGetTarget);
+  server.on("/channels", HTTP_GET, WebUpdateGetChannels);
+  server.on("/channels", HTTP_POST, WebUpdateSetChannels);
+  server.on("/channels", HTTP_OPTIONS, corsPreflightResponse);
   server.on("/firmware.bin", WebUpdateGetFirmware);
 
   server.on("/update", HTTP_POST, WebUploadResponseHandler, WebUploadDataHandler);

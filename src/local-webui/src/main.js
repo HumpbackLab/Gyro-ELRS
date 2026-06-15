@@ -14,6 +14,7 @@ const state = {
   originalUid: [],
   originalUidType: '',
   networks: [],
+  simChannels: Array(16).fill(1500),
   message: null,
   busy: false,
   uploadResult: null,
@@ -396,6 +397,7 @@ function decodePwmConfig(rawValue) {
     narrow: ((raw >> 19) & 1) === 1,
     failsafeMode: (raw >> 20) & 3,
     signalPolarityInverted: ((raw >> 22) & 1) === 1,
+    mixerMode: ((raw >> 23) & 1) === 1,
   };
 }
 
@@ -407,7 +409,8 @@ function encodePwmConfig(decoded) {
   const invert = decoded.inverted ? 1 : 0;
   const narrow = decoded.narrow ? 1 : 0;
   const signalPolarityInverted = decoded.signalPolarityInverted ? 1 : 0;
-  return (signalPolarityInverted << 22) | (narrow << 19) | (failsafeMode << 20) | (mode << 15) | (invert << 14) | (inputChannel << 10) | (failsafe - 988);
+  const mixerMode = decoded.mixerMode ? 1 : 0;
+  return (mixerMode << 23) | (signalPolarityInverted << 22) | (narrow << 19) | (failsafeMode << 20) | (mode << 15) | (invert << 14) | (inputChannel << 10) | (failsafe - 988);
 }
 
 function pwmModeAllowed(features, mode) {
@@ -551,6 +554,8 @@ async function loadDevice() {
   state.target = target;
   state.configResponse = configResponse;
   state.hardware = hardwareResponse;
+  // Load simulated channels for WiFi mode
+  apiFetch('/channels').then(r => { if (r?.channels) state.simChannels = r.channels; renderApp(); }).catch(() => {});
   state.extraMixerRows = 0;
   state.originalUid = bytesToList(configResponse?.config?.uid);
   state.originalUidType = configResponse?.config?.uidtype || '';
@@ -632,6 +637,7 @@ async function savePwm(event) {
       narrow: form.elements[`pwm-narrow-${index}`]?.checked,
       failsafeMode: intOrDefault(form.elements[`pwm-failsafe-mode-${index}`]?.value, 0),
       failsafe: intOrDefault(form.elements[`pwm-failsafe-${index}`]?.value, 1500),
+      mixerMode: intOrDefault(form.elements[`pwm-source-${index}`]?.value, 0) == 1,
     };
     if (mode > 9) {
       if (usedExclusiveModes.has(mode)) {
@@ -847,6 +853,7 @@ function renderPwm() {
                 <th>Pin</th>
                 <th>Features</th>
                 <th>Mode</th>
+                <th>Source</th>
                 <th>Input</th>
                 <th>Invert</th>
                 <th>PolarityInvert</th>
@@ -866,6 +873,7 @@ function renderPwm() {
                     <td>${escapeHtml(entry.pin)}</td>
                     <td><div class="badge-row pwm-badges">${pwmFeatureBadges(entry.features)}</div></td>
                     <td><select name="pwm-mode-${index}" data-pwm-mode="${index}">${renderPwmModeOptions(entry.features, decoded.mode)}</select></td>
+                    <td><select name="pwm-source-${index}" data-pwm-dependent="${index}"><option value="0">RC</option><option value="1" ${selected(decoded.mixerMode, 1)}>Mixer</option></select></td>
                     <td><select name="pwm-input-${index}" data-pwm-dependent="${index}">${pwmInputLabels.map((label, value) => `<option value="${value}" ${selected(decoded.inputChannel, value)}>${label}</option>`).join('')}</select></td>
                     <td><input name="pwm-invert-${index}" type="checkbox" data-pwm-dependent="${index}" ${checked(decoded.inverted)} ${disabled(disabledRow)}></td>
                     <td><input name="pwm-polarity-${index}" type="checkbox" data-pwm-polarity="${index}" ${checked(decoded.signalPolarityInverted)}></td>
@@ -884,6 +892,19 @@ function renderPwm() {
         </div>
         <div class="actions"><button class="primary" ${state.busy ? 'disabled' : ''}>Save</button><button class="secondary" type="button" data-action="refresh">Refresh</button></div>
       </form>
+      <details class="channel-sim-details">
+        <summary>RC Channel Simulator</summary>
+        <div class="helper" style="margin-top:8px">Drag sliders to simulate RC values (988–2012µs) for PWM passthrough in WiFi mode.</div>
+        <div id="channel-sliders" class="channel-grid" style="margin-top:8px">
+          ${[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15].map(i => `
+            <div class="ch-cell">
+              <span class="ch-label">CH${i+1}</span>
+              <input type="range" min="988" max="2012" value="${state.simChannels[i] || 1500}" data-ch-slider="${i}">
+              <span class="ch-value">${state.simChannels[i] || 1500}</span>
+            </div>
+          `).join('')}
+        </div>
+      </details>
     </section>`;
 }
 
@@ -1130,6 +1151,29 @@ function wireOrientationPreview() {
   });
 }
 
+function wireChannelSliders() {
+  const container = document.querySelector('#channel-sliders');
+  if (!container) return;
+  let updateTimer = null;
+  const sendChannels = () => {
+    const channels = state.simChannels.map(v => v || 1500);
+    apiFetch('/channels', {method: 'POST', body: JSON.stringify({channels})}).catch(() => {});
+  };
+  container.querySelectorAll('input[data-ch-slider]').forEach(slider => {
+    slider.addEventListener('input', () => {
+      const i = parseInt(slider.dataset.chSlider);
+      const val = parseInt(slider.value);
+      state.simChannels[i] = val;
+      const cell = slider.closest('.ch-cell');
+      if (cell) {
+        cell.querySelector('.ch-value').textContent = val;
+      }
+      clearTimeout(updateTimer);
+      updateTimer = setTimeout(sendChannels, 100); // debounce
+    });
+  });
+}
+
 function wirePwmForm() {
   const form = document.querySelector('#pwm-form');
   if (!form) return;
@@ -1299,6 +1343,7 @@ function wireEvents() {
   syncBindingPreview();
   wireOrientationPreview();
   wirePwmForm();
+  wireChannelSliders();
 
   document.querySelectorAll('[data-action]').forEach((button) => {
     button.addEventListener('click', () => {

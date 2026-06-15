@@ -14,6 +14,11 @@ extern device_t ServoOut_device;
 
 // Notify this unit that new channel data has arrived
 void servoNewChannelsAvailable();
+// WiFi debugging: set simulated RC channel value (988-2012 us)
+void servoSetSimulatedChannel(uint8_t ch, uint16_t us);
+uint16_t servoGetSimulatedChannel(uint8_t ch);
 #else
 inline void servoNewChannelsAvailable(){};
+inline void servoSetSimulatedChannel(uint8_t ch, uint16_t us) {};
+inline uint16_t servoGetSimulatedChannel(uint8_t ch) { return 0; };
 #endif
