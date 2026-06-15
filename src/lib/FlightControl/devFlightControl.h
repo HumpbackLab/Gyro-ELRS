@@ -9,8 +9,6 @@
 
 extern device_t FlightControl_device;
 
-void flightControlNewChannelsAvailable();
-
 struct FlightControlVector3 {
     float x;
     float y;
@@ -39,5 +37,4 @@ const FlightControlAttitude &flightControlGetAttitude();
 const FlightControlMixerOutput &flightControlGetMixerOutput();
 
 #else
-inline void flightControlNewChannelsAvailable() {};
 #endif

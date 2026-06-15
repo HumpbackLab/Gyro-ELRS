@@ -188,12 +188,6 @@ void FlightControlRuntime::reset()
     _yawAnglePid.reset();
     _mixerOutput = {};
     _lastUpdateUs = 0;
-    _newChannelsAvailable = false;
-}
-
-void FlightControlRuntime::markChannelsAvailable()
-{
-    _newChannelsAvailable = true;
 }
 
 bool FlightControlRuntime::loadPidParameters()
@@ -240,7 +234,7 @@ void FlightControlRuntime::update(uint32_t nowUs)
 {
     _pidReady = loadPidParameters();
 
-    if (!ready() || connectionState != connected || !connectionHasModelMatch || !teamraceHasModelMatch)
+    if (!ready())
     {
         reset();
         return;
@@ -286,7 +280,6 @@ void FlightControlRuntime::update(uint32_t nowUs)
     const float yawCorrection = _yawRatePid.update(yawRateTarget, gyroYaw, dt);
 
     _mixerOutput = _mixer.mix(throttle, rollCorrection, pitchCorrection, yawCorrection);
-    _newChannelsAvailable = false;
 }
 
 #endif

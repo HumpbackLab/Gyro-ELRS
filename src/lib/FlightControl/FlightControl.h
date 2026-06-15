@@ -65,7 +65,6 @@ class FlightControlRuntime {
 public:
     void begin();
     void reset();
-    void markChannelsAvailable();
     void update(uint32_t nowUs);
     bool sensorsReady() const { return _sensorsReady; }
     bool ready() const { return _sensorsReady && _mixerReady && _pidReady; }
@@ -93,7 +92,6 @@ private:
     bool _mixerReady = false;
     bool _pidReady = false;
     bool _angleEnabled = false;
-    bool _newChannelsAvailable = false;
 };
 
 #endif

@@ -808,7 +808,6 @@ void ICACHE_RAM_ATTR HWtimerCallbackTock()
             if (teamraceHasModelMatch)
             {
                 servoNewChannelsAvailable();
-                flightControlNewChannelsAvailable();
             }
         }
         else
@@ -946,7 +945,6 @@ static void ICACHE_RAM_ATTR ProcessRfPacket_RC(OTA_Packet_s const * const otaPkt
             if (teamraceHasModelMatch)
             {
                 servoNewChannelsAvailable();
-                flightControlNewChannelsAvailable();
             }
         }
         else if (!LQCalcDVDA.currentIsSet())

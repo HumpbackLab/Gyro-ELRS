@@ -246,27 +246,7 @@ static int event()
         // so it is safe to shut down when disconnected
         return DURATION_NEVER;
     }
-    if (connectionState == wifiUpdate)
-    {
-        for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
-        {
-            if (pwmChannels[ch] != -1)
-            {
-                PWM.release(pwmChannels[ch]);
-                pwmChannels[ch] = -1;
-            }
-#if defined(PLATFORM_ESP32)
-            if (dshotInstances[ch] != nullptr)
-            {
-                delete dshotInstances[ch];
-                dshotInstances[ch] = nullptr;
-            }
-#endif
-            servoPins[ch] = UNDEF_PIN;
-        }
-        return DURATION_NEVER;
-    }
-    if (!initialized && connectionState == connected)
+    if (!initialized)
     {
         initialized = true;
         for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)

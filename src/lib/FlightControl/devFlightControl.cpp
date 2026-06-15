@@ -4,14 +4,10 @@
 
 #include "FlightControl.h"
 #include "common.h"
+#include "devServoOutput.h"
 #include <Arduino.h>
 
 static FlightControlRuntime runtime;
-
-void ICACHE_RAM_ATTR flightControlNewChannelsAvailable()
-{
-    runtime.markChannelsAvailable();
-}
 
 const FlightControlAttitude &flightControlGetAttitude()
 {
@@ -30,7 +26,7 @@ static void initialize()
 
 static int event()
 {
-    if (!runtime.ready() || connectionState != connected)
+    if (!runtime.ready())
     {
         runtime.reset();
         return DURATION_NEVER;
@@ -41,6 +37,9 @@ static int event()
 static int timeout()
 {
     runtime.update(micros());
+    // Trigger servo update after flight control produces new mixer output,
+    // so PWM works even without RC packets (e.g. WiFi debug mode).
+    servoNewChannelsAvailable();
     return DURATION_IMMEDIATELY;
 }
 
