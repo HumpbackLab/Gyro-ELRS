@@ -10,6 +10,7 @@ const state = {
   target: null,
   configResponse: null,
   hardware: null,
+  runtimeStatus: null,
   bindingPhrase: '',
   originalUid: [],
   originalUidType: '',
@@ -557,16 +558,21 @@ function validateArray(label, value, rowSize, exactLength) {
 }
 
 async function loadDevice() {
-  const [target, configResponse, hardwareResponse] = await Promise.all([
+  const [target, configResponse, hardwareResponse, runtimeStatus] = await Promise.all([
     apiFetch('/target'),
     apiFetch('/config'),
     apiFetch('/hardware.json').catch(() => ({})),
+    apiFetch('/status.json').catch(() => null),
   ]);
   state.target = target;
   state.configResponse = configResponse;
   state.hardware = hardwareResponse;
+  state.runtimeStatus = runtimeStatus;
   // Load simulated channels for WiFi mode
-  apiFetch('/channels').then(r => { if (r?.channels) state.simChannels = r.channels; renderApp(); }).catch(() => {});
+  apiFetch('/channels').then((r) => {
+    if (r?.channels) state.simChannels = r.channels;
+    render();
+  }).catch(() => {});
   state.extraMixerRows = 0;
   state.originalUid = bytesToList(configResponse?.config?.uid);
   state.originalUidType = configResponse?.config?.uidtype || '';
@@ -778,6 +784,20 @@ async function forceUpdate(action) {
 function renderStatus() {
   const c = config();
   const h = hardware();
+  const loop = state.runtimeStatus?.['main-loop'] || {};
+  const pwmIsr = state.runtimeStatus?.['pwm-isr'] || {};
+  const pwmCrash = state.runtimeStatus?.['pwm-crash'] || {};
+  const hasLoopSample = loop['sample-window-ms'] !== undefined && loop['sample-window-ms'] !== null;
+  const hasPwmIsrSample = pwmIsr['sample-window-ms'] !== undefined && pwmIsr['sample-window-ms'] !== null;
+  const loopValue = (key, suffix = '') => (
+    hasLoopSample && loop[key] !== undefined && loop[key] !== null ? `${loop[key]}${suffix}` : 'Waiting...'
+  );
+  const pwmIsrValue = (key, suffix = '') => (
+    hasPwmIsrSample && pwmIsr[key] !== undefined && pwmIsr[key] !== null ? `${pwmIsr[key]}${suffix}` : 'Waiting...'
+  );
+  const pwmCrashValue = (key, suffix = '') => (
+    pwmCrash[key] !== undefined && pwmCrash[key] !== null && pwmCrash[key] !== '' ? `${pwmCrash[key]}${suffix}` : 'Waiting...'
+  );
   return `
     <div class="grid">
       <section class="panel">
@@ -798,6 +818,36 @@ function renderStatus() {
         <h2>Sensors</h2>
         <div class="metric"><span>Gyro</span><strong>${state.target?.['has-gyro'] ? 'Detected' : 'Not detected'}</strong>${state.target?.['gyro-msg'] ? `<div class="diag-msg">${escapeHtml(state.target['gyro-msg']).replace(/\n/g, '<br>')}</div>` : ''}</div>
         ${state.target?.['has-vbat'] ? `<div class="metric"><span>VBAT</span><strong>${(state.target['vbat-voltage'] * 0.01).toFixed(2)} V</strong></div>` : ''}
+      </section>
+      <section class="panel">
+        <h2>Main Loop</h2>
+        <div class="metric"><span>Sample Window</span><strong>${escapeHtml(loopValue('sample-window-ms', ' ms'))}</strong></div>
+        <div class="metric"><span>Loop Rate</span><strong>${escapeHtml(loopValue('loop-hz', ' Hz'))}</strong></div>
+        <div class="metric"><span>Average Period</span><strong>${escapeHtml(loopValue('avg-period-us', ' us'))}</strong></div>
+        <div class="metric"><span>Max Period</span><strong>${escapeHtml(loopValue('max-period-us', ' us'))}</strong></div>
+        <div class="metric"><span>Average Work</span><strong>${escapeHtml(loopValue('avg-work-us', ' us'))}</strong></div>
+        <div class="metric"><span>Max Work</span><strong>${escapeHtml(loopValue('max-work-us', ' us'))}</strong></div>
+      </section>
+      <section class="panel">
+        <h2>PWM ISR</h2>
+        <div class="metric"><span>Sample Window</span><strong>${escapeHtml(pwmIsrValue('sample-window-ms', ' ms'))}</strong></div>
+        <div class="metric"><span>ISR Calls</span><strong>${escapeHtml(pwmIsrValue('calls'))}</strong></div>
+        <div class="metric"><span>ISR Rate</span><strong>${escapeHtml(pwmIsrValue('rate-hz', ' Hz'))}</strong></div>
+        <div class="metric"><span>Average ISR</span><strong>${escapeHtml(pwmIsrValue('avg-us', ' us'))}</strong></div>
+        <div class="metric"><span>Max ISR</span><strong>${escapeHtml(pwmIsrValue('max-us', ' us'))}</strong></div>
+        <div class="metric"><span>Max Loop Count</span><strong>${escapeHtml(pwmIsrValue('max-loops'))}</strong></div>
+      </section>
+      <section class="panel">
+        <h2>PWM Crash</h2>
+        <div class="metric"><span>Boot Count</span><strong>${escapeHtml(pwmCrashValue('boot-count'))}</strong></div>
+        <div class="metric"><span>Suspicious Resets</span><strong>${escapeHtml(pwmCrashValue('suspicious-reset-count'))}</strong></div>
+        <div class="metric"><span>Reset Reason</span><strong>${escapeHtml(pwmCrashValue('reset-reason'))}</strong></div>
+        <div class="metric"><span>Active Stage</span><strong>${escapeHtml(pwmCrashValue('active-stage'))}</strong></div>
+        <div class="metric"><span>Active GPIO</span><strong>${escapeHtml(pwmCrashValue('active-gpio'))}</strong></div>
+        <div class="metric"><span>Active High/Low</span><strong>${escapeHtml(`${pwmCrashValue('active-high-us')} / ${pwmCrashValue('active-low-us')}`)}</strong></div>
+        <div class="metric"><span>Last Reset Stage</span><strong>${escapeHtml(pwmCrashValue('last-reset-stage'))}</strong></div>
+        <div class="metric"><span>Last Reset GPIO</span><strong>${escapeHtml(pwmCrashValue('last-reset-gpio'))}</strong></div>
+        <div class="metric"><span>Last Reset High/Low</span><strong>${escapeHtml(`${pwmCrashValue('last-reset-high-us')} / ${pwmCrashValue('last-reset-low-us')}`)}</strong></div>
       </section>
     </div>`;
 }
