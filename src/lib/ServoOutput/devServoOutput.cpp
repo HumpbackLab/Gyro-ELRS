@@ -195,7 +195,7 @@ static void servosUpdate(unsigned long now)
     // LQ goes to 0 (100 packets missed in a row)
     // OR last update older than FAILSAFE_ABS_TIMEOUT_MS
     // go to failsafe
-    else if (lastUpdate && ((getLq() == 0) || (now - lastUpdate > FAILSAFE_ABS_TIMEOUT_MS)))
+    else if (lastUpdate && connectionState != wifiUpdate && ((getLq() == 0) || (now - lastUpdate > FAILSAFE_ABS_TIMEOUT_MS)))
     {
         servosFailsafe();
         lastUpdate = 0;
@@ -267,10 +267,8 @@ static void initialize()
 
 static int event()
 {
-    if (!OPT_HAS_SERVO_OUTPUT || connectionState == disconnected)
+    if (!OPT_HAS_SERVO_OUTPUT)
     {
-        // Disconnected should come after failsafe on the RX,
-        // so it is safe to shut down when disconnected
         return DURATION_NEVER;
     }
     if (!initialized)
