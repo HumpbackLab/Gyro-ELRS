@@ -173,6 +173,13 @@ void Gyro_SC7U22::startGyro()
 
 bool Gyro_SC7U22::getGyroDps(GyroVector3 &gyro)
 {
+    GyroVector3 accelMps2;
+    bool accelValid = false;
+    return getMotion(gyro, accelMps2, accelValid);
+}
+
+bool Gyro_SC7U22::getMotion(GyroVector3 &gyro, GyroVector3 &accelMps2, bool &accelValid)
+{
     // Read 12 bytes starting from ACC_XH (0x0C)
     // Data layout: Accel X[2], Accel Y[2], Accel Z[2], Gyro X[2], Gyro Y[2], Gyro Z[2]
     // All values are 16-bit signed big-endian
@@ -183,10 +190,19 @@ bool Gyro_SC7U22::getGyroDps(GyroVector3 &gyro)
         return false;
     }
 
+    int16_t accelRawX = (int16_t)(((uint16_t)raw[0] << 8) | raw[1]);
+    int16_t accelRawY = (int16_t)(((uint16_t)raw[2] << 8) | raw[3]);
+    int16_t accelRawZ = (int16_t)(((uint16_t)raw[4] << 8) | raw[5]);
+
     // Extract gyro data from bytes 6-11
     int16_t gyroRawX = (int16_t)(((uint16_t)raw[6] << 8) | raw[7]);
     int16_t gyroRawY = (int16_t)(((uint16_t)raw[8] << 8) | raw[9]);
     int16_t gyroRawZ = (int16_t)(((uint16_t)raw[10] << 8) | raw[11]);
+
+    accelMps2.x = (float)accelRawX * ACCEL_SCALE_MPS2;
+    accelMps2.y = (float)accelRawY * ACCEL_SCALE_MPS2;
+    accelMps2.z = (float)accelRawZ * ACCEL_SCALE_MPS2;
+    accelValid = true;
 
     // Convert to degrees per second
     gyro.x = (float)gyroRawX * GYRO_SCALE;

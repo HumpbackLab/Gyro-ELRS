@@ -62,9 +62,11 @@ static int Gyro_Init()
     return GYRO_STARTUP_INTERVAL;
 }
 
-static void Gyro_Publish(const GyroVector3 &gyroDps)
+static void Gyro_Publish(const GyroVector3 &gyroDps, const GyroVector3 &accelMps2, bool accelValid)
 {
     latestSample.gyroDps = gyroDps;
+    latestSample.accelMps2 = accelMps2;
+    latestSample.accelValid = accelValid;
     latestSample.timestampMs = millis();
     latestSampleValid = true;
 }
@@ -127,11 +129,13 @@ static int timeout()
         case grsWaitingGyro:
             {
                 GyroVector3 gyroDps;
-                if (!gyro->getGyroDps(gyroDps))
+                GyroVector3 accelMps2;
+                bool accelValid = false;
+                if (!gyro->getMotion(gyroDps, accelMps2, accelValid))
                 {
                     return DURATION_IMMEDIATELY;
                 }
-                Gyro_Publish(gyroDps);
+                Gyro_Publish(gyroDps, accelMps2, accelValid);
                 GyroReadState = grsReadGyro;
                 return DURATION_IMMEDIATELY;
             }

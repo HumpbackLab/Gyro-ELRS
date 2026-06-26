@@ -5,6 +5,7 @@
 #include "common.h"
 #include "config.h"
 #include "crsf_protocol.h"
+#include "devGyro.h"
 #include "helpers.h"
 #include <Arduino.h>
 #include <math.h>
@@ -21,13 +22,31 @@ static constexpr uint8_t FC_ORIENTATION_VALUES = 9;
 
 bool FlightControlSensorBackend::begin()
 {
-    return false;
+    return GyroIsInitialized();
 }
 
 bool FlightControlSensorBackend::read(FlightControlImuSample &sample)
 {
     sample = {};
-    return false;
+    GyroSample gyroSample = {};
+    if (!GyroGetSample(gyroSample))
+    {
+        return false;
+    }
+
+    sample.gyroDps = {
+        gyroSample.gyroDps.x,
+        gyroSample.gyroDps.y,
+        gyroSample.gyroDps.z,
+    };
+    sample.accelMps2 = {
+        gyroSample.accelMps2.x,
+        gyroSample.accelMps2.y,
+        gyroSample.accelMps2.z,
+    };
+    sample.gyroValid = true;
+    sample.accelValid = gyroSample.accelValid;
+    return true;
 }
 
 void FlightControlEstimator::reset()
@@ -170,10 +189,8 @@ void FlightControlOrientation::apply(FlightControlImuSample &sample) const
 
 void FlightControlRuntime::begin()
 {
-    _sensorsReady = _sensors.begin();
     _orientation.begin();
-    _mixerReady = _mixer.begin();
-    _pidReady = loadPidParameters();
+    refreshReadyState();
     reset();
 }
 
@@ -188,6 +205,20 @@ void FlightControlRuntime::reset()
     _yawAnglePid.reset();
     _mixerOutput = {};
     _lastUpdateUs = 0;
+}
+
+bool FlightControlRuntime::refreshReadyState()
+{
+    if (!_sensorsReady)
+    {
+        _sensorsReady = _sensors.begin();
+    }
+    if (!_mixerReady)
+    {
+        _mixerReady = _mixer.begin();
+    }
+    _pidReady = loadPidParameters();
+    return ready();
 }
 
 bool FlightControlRuntime::loadPidParameters()
@@ -232,9 +263,7 @@ void FlightControlRuntime::loadStickTargets(float &throttle, float &roll, float 
 
 void FlightControlRuntime::update(uint32_t nowUs)
 {
-    _pidReady = loadPidParameters();
-
-    if (!ready())
+    if (!refreshReadyState())
     {
         reset();
         return;
@@ -251,6 +280,7 @@ void FlightControlRuntime::update(uint32_t nowUs)
     FlightControlImuSample sample = {};
     if (!_sensors.read(sample))
     {
+        _sensorsReady = false;
         reset();
         return;
     }

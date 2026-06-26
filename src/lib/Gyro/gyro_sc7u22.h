@@ -15,6 +15,7 @@ public:
     uint8_t getGyroDuration() override;
     void startGyro() override;
     bool getGyroDps(GyroVector3 &gyro) override;
+    bool getMotion(GyroVector3 &gyro, GyroVector3 &accelMps2, bool &accelValid) override;
 
     static bool detect();
 
@@ -63,6 +64,8 @@ private:
 
     // Scale factor for 2000 DPS range: 2000 / 32768 = 1 / 16.384
     static constexpr float GYRO_SCALE = 1.0f / 16.384f;
+    // Scale factor for 16G range: 16G / 32768, converted to m/s^2.
+    static constexpr float ACCEL_SCALE_MPS2 = (16.0f * 9.80665f) / 32768.0f;
 
     static uint8_t m_i2cAddress;
 

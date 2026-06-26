@@ -8,6 +8,7 @@
 #include <Arduino.h>
 
 static FlightControlRuntime runtime;
+static constexpr int FC_READY_RETRY_INTERVAL_MS = 100;
 
 const FlightControlAttitude &flightControlGetAttitude()
 {
@@ -26,10 +27,10 @@ static void initialize()
 
 static int event()
 {
-    if (!runtime.ready())
+    if (!runtime.refreshReadyState())
     {
         runtime.reset();
-        return DURATION_NEVER;
+        return FC_READY_RETRY_INTERVAL_MS;
     }
     return DURATION_IMMEDIATELY;
 }
@@ -37,10 +38,14 @@ static int event()
 static int timeout()
 {
     runtime.update(micros());
-    // Trigger servo update after flight control produces new mixer output,
-    // so PWM works even without RC packets (e.g. WiFi debug mode).
-    servoNewChannelsAvailable();
-    return 4; // 250Hz, matched to FC_UPDATE_INTERVAL_US
+    if (runtime.ready())
+    {
+        // Trigger servo update after flight control produces new mixer output,
+        // so PWM works even without RC packets (e.g. WiFi debug mode).
+        servoNewChannelsAvailable();
+        return 4; // 250Hz, matched to FC_UPDATE_INTERVAL_US
+    }
+    return FC_READY_RETRY_INTERVAL_MS;
 }
 
 device_t FlightControl_device = {

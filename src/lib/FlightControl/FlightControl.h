@@ -65,6 +65,7 @@ class FlightControlRuntime {
 public:
     void begin();
     void reset();
+    bool refreshReadyState();
     void update(uint32_t nowUs);
     bool sensorsReady() const { return _sensorsReady; }
     bool ready() const { return _sensorsReady && _mixerReady && _pidReady; }

@@ -21,7 +21,9 @@ enum eGyroReadState : uint8_t
 struct GyroSample
 {
     GyroVector3 gyroDps;
+    GyroVector3 accelMps2;
     uint32_t timestampMs;
+    bool accelValid;
 };
 
 extern device_t Gyro_device;
