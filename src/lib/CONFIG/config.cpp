@@ -1121,6 +1121,8 @@ RxConfig::SetDefaults(bool commit)
 
         for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)
         {
+            // Store hardware/WebUI PID defaults as centi-units in int16 config
+            // so CRSF/LUA integer parameters can preserve two decimal places.
             const float scaled = src[i] * 100.0f;
             dest[i] = (int16_t)(scaled >= 0.0f ? scaled + 0.5f : scaled - 0.5f);
         }

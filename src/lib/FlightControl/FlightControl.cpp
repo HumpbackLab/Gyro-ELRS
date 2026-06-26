@@ -19,6 +19,12 @@ static constexpr uint8_t FC_MIXER_COLUMNS = 4;
 static constexpr uint8_t FC_PID_COLUMNS = 4;
 static constexpr uint8_t FC_PID_AXES = 3;
 static constexpr uint8_t FC_ORIENTATION_VALUES = 9;
+// RX config stores PID values in centi-units for LUA/CRSF int16 transport;
+// restore them to the same floating-point units shown in the WebUI.
+static constexpr float FC_PID_CONFIG_SCALE = 0.01f;
+// Mixer coefficients produce an arbitrary summed control value. Convert that
+// final mixer sum into a PWM pulse-width offset in microseconds.
+static constexpr float FC_MIXER_OUTPUT_US_SCALE = 1e-3f;
 
 bool FlightControlSensorBackend::begin()
 {
@@ -144,7 +150,8 @@ FlightControlMixerOutput FlightControlMixer::mix(float throttle, float roll, flo
             roll * _mix[offset + 1] +
             pitch * _mix[offset + 2] +
             yaw * _mix[offset + 3];
-        output.motorUs[i] = 1000 + (uint16_t)(constrain(motor, 0.0f, 1.0f) * 1000.0f);
+        // PWM output is absolute pulse width: base 1000us plus scaled mixer offset.
+        output.motorUs[i] = (uint16_t)constrain(1000.0f + motor * FC_MIXER_OUTPUT_US_SCALE, 1000.0f, 2000.0f);
     }
     return output;
 }
@@ -242,9 +249,10 @@ bool FlightControlRuntime::loadPidBank(FlightControlPid &rollPid, FlightControlP
         return false;
     }
 
-    rollPid.set(pid[0] * 0.01f, pid[1] * 0.01f, pid[2] * 0.01f, pid[3] * 0.01f);
-    pitchPid.set(pid[4] * 0.01f, pid[5] * 0.01f, pid[6] * 0.01f, pid[7] * 0.01f);
-    yawPid.set(pid[8] * 0.01f, pid[9] * 0.01f, pid[10] * 0.01f, pid[11] * 0.01f);
+    // Convert centi-unit config values back to WebUI units before PID math.
+    rollPid.set(pid[0] * FC_PID_CONFIG_SCALE, pid[1] * FC_PID_CONFIG_SCALE, pid[2] * FC_PID_CONFIG_SCALE, pid[3] * FC_PID_CONFIG_SCALE);
+    pitchPid.set(pid[4] * FC_PID_CONFIG_SCALE, pid[5] * FC_PID_CONFIG_SCALE, pid[6] * FC_PID_CONFIG_SCALE, pid[7] * FC_PID_CONFIG_SCALE);
+    yawPid.set(pid[8] * FC_PID_CONFIG_SCALE, pid[9] * FC_PID_CONFIG_SCALE, pid[10] * FC_PID_CONFIG_SCALE, pid[11] * FC_PID_CONFIG_SCALE);
     return true;
 }
 
