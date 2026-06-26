@@ -248,8 +248,22 @@ void PWMController::setMicroseconds(pwm_channel_t channel, uint16_t microseconds
 
 void PWMController::setMicrosecondsPolarityInverted(pwm_channel_t channel, uint16_t microseconds)
 {
-    // Polarity-inverted pulse output is not implemented on ESP32 yet.
-    // Fall back to the normal pulse shape so callers do not get a silent no-op.
-    setMicroseconds(channel, microseconds);
+    if (IS_LEDC_CHANNEL(channel))
+    {
+        auto ch = LEDC_CHANNEL(channel);
+        // Invert the pulse: normal mode outputs HIGH for `microseconds` then LOW.
+        // Inverted mode outputs LOW for `microseconds` then HIGH, which is the
+        // same as HIGH for (interval - microseconds).
+        uint32_t inverted = ledc_config[ch].interval - microseconds;
+        ledcWrite(ch, map(inverted, 0, ledc_config[ch].interval, 0, (1 << ledc_config[ch].resolution_bits) - 1));
+    }
+#if SOC_MCPWM_SUPPORTED
+    else if (IS_MCPWM_CHANNEL(channel))
+    {
+        auto ch = MCPWM_CHANNEL(channel);
+        uint32_t refreshInterval = 1000000U / mcpwm_frequencies[ch];
+        mcpwm_set_duty_in_us(mcpwm_config[ch].unit, mcpwm_config[ch].timer, mcpwm_config[ch].generator, refreshInterval - microseconds);
+    }
+#endif
 }
 #endif
