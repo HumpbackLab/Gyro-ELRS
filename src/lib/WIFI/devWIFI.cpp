@@ -478,6 +478,30 @@ static void GetRuntimeStatus(AsyncWebServerRequest *request)
   pwmCrash["last-reset-high-us"] = breadcrumbs.lastResetHighUs;
   pwmCrash["last-reset-low-us"] = breadcrumbs.lastResetLowUs;
 #endif
+#if defined(HAS_GYRO)
+  JsonObject imu = json["imu"].to<JsonObject>();
+  imu["gyro-ready"] = GyroIsInitialized();
+  GyroSample gyroSample;
+  if (GyroGetSample(gyroSample))
+  {
+    imu["sample-ms"] = gyroSample.timestampMs;
+    imu["accel-valid"] = gyroSample.accelValid;
+
+    JsonObject accel = imu["accel-mps2"].to<JsonObject>();
+    accel["x"] = gyroSample.accelMps2.x;
+    accel["y"] = gyroSample.accelMps2.y;
+    accel["z"] = gyroSample.accelMps2.z;
+
+    JsonObject gyro = imu["gyro-dps"].to<JsonObject>();
+    gyro["x"] = gyroSample.gyroDps.x;
+    gyro["y"] = gyroSample.gyroDps.y;
+    gyro["z"] = gyroSample.gyroDps.z;
+  }
+  else
+  {
+    imu["accel-valid"] = false;
+  }
+#endif
   response->setLength();
   request->send(response);
 }

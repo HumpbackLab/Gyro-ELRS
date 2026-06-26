@@ -24,6 +24,7 @@ const state = {
   eulerRoll: 0,
   eulerPitch: 0,
   eulerYaw: 0,
+  orientationCal: null,
 };
 
 const tabs = [
@@ -577,7 +578,7 @@ async function loadDevice() {
   state.originalUid = bytesToList(configResponse?.config?.uid);
   state.originalUidType = configResponse?.config?.uidtype || '';
   const orient = (hardwareResponse?.fc_orientation || []).length === 9 ? hardwareResponse.fc_orientation : (state.hardware?.fc_orientation || []);
-  const [roll, pitch, yaw] = eulerFromMatrix(orient);
+  const [roll, pitch, yaw] = installEulerFromOrientationMatrix(orient);
   state.eulerRoll = roll;
   state.eulerPitch = pitch;
   state.eulerYaw = yaw;
@@ -692,11 +693,135 @@ async function saveFlight(event) {
     next.fc_rate_pid = readNumGrid(form, 'fc_rate_pid', 3, 4);
     next.fc_angle_pid = readNumGrid(form, 'fc_angle_pid', 3, 4);
     next.fc_mixer = readNumGrid(form, 'fc_mixer', motorCount(), 4);
-    next.fc_orientation = matrixFromEuler(state.eulerRoll, state.eulerPitch, state.eulerYaw);
+    next.fc_orientation = orientationMatrixFromInstallEuler(state.eulerRoll, state.eulerPitch, state.eulerYaw);
     await apiFetch('/hardware.json', {method: 'POST', body: JSON.stringify(next)});
     state.extraMixerRows = 0;
     await loadDevice();
   }, 'Flight control hardware settings saved');
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function vectorLength(v) {
+  return Math.hypot(v[0], v[1], v[2]);
+}
+
+function normalizeVector(v) {
+  const length = vectorLength(v);
+  if (!Number.isFinite(length) || length < 0.1) {
+    throw new Error('IMU acceleration sample is too small or invalid');
+  }
+  return v.map((value) => value / length);
+}
+
+function nearestCardinalAxis(v) {
+  const axis = [0, 0, 0];
+  let best = 0;
+  for (let i = 1; i < 3; i += 1) {
+    if (Math.abs(v[i]) > Math.abs(v[best])) best = i;
+  }
+  axis[best] = v[best] >= 0 ? 1 : -1;
+  return axis;
+}
+
+function dotVector(a, b) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function crossVector(a, b) {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+
+function normalizeCardinalAngle(degrees) {
+  let value = Math.round(degrees / 90) * 90;
+  while (value > 180) value -= 360;
+  while (value < -180) value += 360;
+  return value;
+}
+
+async function sampleRawAccel(sampleCount = 24, delayMs = 40) {
+  const sum = [0, 0, 0];
+  let valid = 0;
+  for (let i = 0; i < sampleCount; i += 1) {
+    const status = await apiFetch('/status.json', {timeout: 2000});
+    const imu = status?.imu || {};
+    const accel = imu['accel-mps2'];
+    if (imu['accel-valid'] && accel) {
+      const x = Number(accel.x);
+      const y = Number(accel.y);
+      const z = Number(accel.z);
+      if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+        sum[0] += x;
+        sum[1] += y;
+        sum[2] += z;
+        valid += 1;
+      }
+    }
+    if (i + 1 < sampleCount) await sleep(delayMs);
+  }
+  if (valid < Math.ceil(sampleCount * 0.75)) {
+    throw new Error('Not enough valid accelerometer samples from /status.json');
+  }
+  return normalizeVector(sum.map((value) => value / valid));
+}
+
+function orientationEulerFromSamples(levelRaw, forwardRaw) {
+  // Firmware expects fc_orientation to rotate raw IMU axes into the internal frame.
+  // Level gravity maps to internal +Z; nose-up gravity maps to internal +X.
+  // The resulting matrix is therefore the firmware matrix, not the user-facing
+  // physical install attitude. Convert it back before filling the UI controls.
+  const rowZ = nearestCardinalAxis(levelRaw);
+  const rowX = nearestCardinalAxis(forwardRaw);
+  if (Math.abs(dotVector(rowX, rowZ)) > 0) {
+    throw new Error('Level and nose-up samples snapped to the same IMU axis; rotate to a different face and sample again');
+  }
+  const rowY = crossVector(rowZ, rowX);
+  const matrix = [...rowX, ...rowY, ...rowZ];
+  const [roll, pitch, yaw] = installEulerFromOrientationMatrix(matrix).map(normalizeCardinalAngle);
+  return {roll, pitch, yaw, matrix};
+}
+
+function orientationCalText() {
+  if (state.orientationCal?.level) {
+    return 'Level sampled. Stand the model on its tail so the expected forward direction points up, then press the button below.';
+  }
+  return 'Place the model level in the expected level attitude, then press the button below.';
+}
+
+function orientationCalButtonText() {
+  if (state.orientationCal?.level) {
+    return 'Sample Nose Up';
+  }
+  return 'Sample Level';
+}
+
+function setEulerAngles(roll, pitch, yaw) {
+  state.eulerRoll = roll;
+  state.eulerPitch = pitch;
+  state.eulerYaw = yaw;
+}
+
+async function quickOrientationStep() {
+  await runBusy(async () => {
+    if (!state.orientationCal?.level) {
+      const level = await sampleRawAccel();
+      state.orientationCal = {level};
+      setMessage('ok', 'Level sample captured. Stand the model on its tail so the expected forward direction points up, then press Sample Nose Up.');
+      return;
+    }
+
+    const forward = await sampleRawAccel();
+    const result = orientationEulerFromSamples(state.orientationCal.level, forward);
+    setEulerAngles(result.roll, result.pitch, result.yaw);
+    state.orientationCal = null;
+    setMessage('ok', `Board orientation set to roll=${result.roll}, pitch=${result.pitch}, yaw=${result.yaw}. Press Save to write it.`);
+  });
 }
 
 async function saveHardwareJson(event) {
@@ -938,7 +1063,7 @@ function renderPwm() {
                     <td>${escapeHtml(entry.pin)}</td>
                     <td><div class="badge-row pwm-badges">${pwmFeatureBadges(entry.features)}</div></td>
                     <td><select name="pwm-mode-${index}" data-pwm-mode="${index}">${renderPwmModeOptions(entry.features, decoded.mode)}</select></td>
-                    <td><select name="pwm-source-${index}" data-pwm-dependent="${index}"><option value="0">RC</option><option value="1" ${selected(decoded.mixerMode, 1)}>Mixer</option></select></td>
+                    <td><select name="pwm-source-${index}" data-pwm-dependent="${index}"><option value="0" ${selected(decoded.mixerMode ? 1 : 0, 0)}>RC</option><option value="1" ${selected(decoded.mixerMode ? 1 : 0, 1)}>Mixer</option></select></td>
                     <td><select name="pwm-input-${index}" data-pwm-dependent="${index}">${pwmInputLabels.map((label, value) => `<option value="${value}" ${selected(decoded.inputChannel, value)}>${label}</option>`).join('')}</select></td>
                     <td><input name="pwm-invert-${index}" type="checkbox" data-pwm-dependent="${index}" ${checked(decoded.inverted)} ${disabled(disabledRow)}></td>
                     <td><input name="pwm-polarity-${index}" type="checkbox" data-pwm-polarity="${index}" ${checked(decoded.signalPolarityInverted)}></td>
@@ -1018,12 +1143,43 @@ function matrixFromEuler(roll, pitch, yaw) {
   ];
 }
 
+function transposeMatrix3(m) {
+  if (!m || m.length < 9) return [];
+  return [
+    numCellValue(m, 0), numCellValue(m, 3), numCellValue(m, 6),
+    numCellValue(m, 1), numCellValue(m, 4), numCellValue(m, 7),
+    numCellValue(m, 2), numCellValue(m, 5), numCellValue(m, 8),
+  ];
+}
+
+function orientationMatrixFromInstallEuler(roll, pitch, yaw) {
+  // UI angles describe the physical board install attitude in the body frame.
+  // Firmware fc_orientation has the opposite direction: raw IMU frame -> internal
+  // body frame (+X forward, +Y left, +Z up). For pure rotation matrices the
+  // inverse is the transpose, so the saved matrix is the inverse of the visible
+  // install angle. Example: a physical yaw=90 install may save as yaw=-90.
+  return transposeMatrix3(matrixFromEuler(roll, pitch, yaw)).map(round4);
+}
+
+function installEulerFromOrientationMatrix(m) {
+  // Hardware JSON stores the firmware raw->internal matrix. Show users the
+  // inverse because the UI labels are physical install roll/pitch/yaw.
+  return eulerFromMatrix(transposeMatrix3(m));
+}
+
 function round4(value) {
   return Math.round(value * 10000) / 10000;
 }
 
 function formatMatrixRow(row) {
   return row.map((v) => String(v).padStart(8)).join(' ');
+}
+
+function boardPreviewTransform(roll, pitch, yaw) {
+  // The board graphic draws FlightControl +X forward as the on-screen FW arrow.
+  // Map preview rotations onto that frame: roll about forward, pitch about left,
+  // and yaw inverted for CSS' top-down screen rotation direction.
+  return `rotateZ(${-yaw}deg) rotateY(${roll}deg) rotateX(${pitch}deg)`;
 }
 
 function renderFlight() {
@@ -1036,7 +1192,7 @@ function renderFlight() {
   const roll = state.eulerRoll ?? 0;
   const pitch = state.eulerPitch ?? 0;
   const yaw = state.eulerYaw ?? 0;
-  const matrix = matrixFromEuler(roll, pitch, yaw);
+  const matrix = orientationMatrixFromInstallEuler(roll, pitch, yaw);
   const matrixText = [
     formatMatrixRow(matrix.slice(0, 3)),
     formatMatrixRow(matrix.slice(3, 6)),
@@ -1093,7 +1249,7 @@ function renderFlight() {
             </div>
             <div class="preview-scene">
               <div class="preview-scene-inner">
-                <div class="preview-board" id="board-preview" style="transform:rotateX(${roll}deg) rotateY(${pitch}deg) rotateZ(${yaw}deg)">
+                <div class="preview-board" id="board-preview" style="transform:${boardPreviewTransform(roll, pitch, yaw)}">
                   <div class="board-top">
                     <div class="board-chip">▲</div>
                     <div class="board-label">FW</div>
@@ -1102,6 +1258,10 @@ function renderFlight() {
               </div>
             </div>
             <div class="matrix-display">${escapeHtml(matrixText)}</div>
+            <div class="helper">${escapeHtml(orientationCalText())}</div>
+            <div class="actions">
+              <button class="secondary" type="button" data-action="quick-orientation" ${state.busy ? 'disabled' : ''}>${escapeHtml(orientationCalButtonText())}</button>
+            </div>
           </div>
         </div>
         <div class="actions"><button class="primary" ${state.busy ? 'disabled' : ''}>Save</button><button class="secondary" type="button" data-action="reboot">Reboot</button></div>
@@ -1186,9 +1346,9 @@ function wireOrientationPreview() {
     state.eulerRoll = roll;
     state.eulerPitch = pitch;
     state.eulerYaw = yaw;
-    board.style.transform = `rotateX(${roll}deg) rotateY(${pitch}deg) rotateZ(${yaw}deg)`;
+    board.style.transform = boardPreviewTransform(roll, pitch, yaw);
     if (matrixDisplay) {
-      const m = matrixFromEuler(roll, pitch, yaw);
+      const m = orientationMatrixFromInstallEuler(roll, pitch, yaw);
       matrixDisplay.textContent = [
         formatMatrixRow(m.slice(0, 3)),
         formatMatrixRow(m.slice(3, 6)),
@@ -1429,6 +1589,7 @@ function wireEvents() {
       if (action === 'forget') postPlain('/forget', 'Home network forgotten');
       if (action === 'add-motor') { state.extraMixerRows = (state.extraMixerRows || 0) + 1; render(); }
       if (action === 'remove-motor') { state.extraMixerRows = Math.max(0, (state.extraMixerRows || 0) - 1); render(); }
+      if (action === 'quick-orientation') quickOrientationStep();
       if (action === 'force-confirm') forceUpdate('confirm');
       if (action === 'force-cancel') forceUpdate('cancel');
     });
