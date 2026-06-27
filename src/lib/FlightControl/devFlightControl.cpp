@@ -21,6 +21,11 @@ const FlightControlMixerOutput &flightControlGetMixerOutput()
     return runtime.mixerOutput();
 }
 
+bool flightControlGetDebugSnapshot(FlightControlDebugSnapshot &snapshot)
+{
+    return runtime.getDebugSnapshot(snapshot);
+}
+
 static void initialize()
 {
     runtime.begin();
@@ -57,6 +62,11 @@ static int timeout()
 {
     if (!rcInputReady())
     {
+        if (connectionState == wifiUpdate)
+        {
+            runtime.updateAttitudeOnly(micros());
+            return 4;
+        }
         runtime.reset();
         return FC_READY_RETRY_INTERVAL_MS;
     }

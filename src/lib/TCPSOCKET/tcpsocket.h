@@ -6,6 +6,7 @@
 #include "ESPAsyncWebServer.h"
 #include "crsf2msp.h"
 #include "msp2crsf.h"
+#include "msp.h"
 #include "FIFO.h"
 
 #define BUFFER_OUTPUT_SIZE 1024
@@ -32,6 +33,8 @@ private:
     bool hasClient() const { return (TCPclient != nullptr); }
     void pumpData();
     void write(uint8_t *data, uint16_t len);
+    bool handleLocalMspRequest(const uint8_t *data, uint16_t len);
+    void writeMspResponse(uint16_t function, const uint8_t *payload, uint16_t payloadLen);
     void clientConnect(AsyncClient *client);
     void clientDisconnect(AsyncClient *client);
 

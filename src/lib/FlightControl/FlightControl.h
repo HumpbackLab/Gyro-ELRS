@@ -15,9 +15,13 @@ public:
     void reset();
     void update(const FlightControlImuSample &sample, float dt);
     const FlightControlAttitude &attitude() const { return _attitude; }
+    const FlightControlAttitude &accelAttitude() const { return _accelAttitude; }
+    bool attitudeValid() const { return _attitudeValid; }
 
 private:
     FlightControlAttitude _attitude = {};
+    FlightControlAttitude _accelAttitude = {};
+    bool _attitudeValid = false;
 };
 
 class FlightControlPid {
@@ -67,10 +71,12 @@ public:
     void reset();
     bool refreshReadyState();
     void update(uint32_t nowUs);
+    void updateAttitudeOnly(uint32_t nowUs);
     bool sensorsReady() const { return _sensorsReady; }
     bool ready() const { return _sensorsReady && _mixerReady && _pidReady; }
     const FlightControlAttitude &attitude() const { return _estimator.attitude(); }
     const FlightControlMixerOutput &mixerOutput() const { return _mixerOutput; }
+    bool getDebugSnapshot(FlightControlDebugSnapshot &snapshot) const;
 
 private:
     bool loadPidParameters();
@@ -88,6 +94,10 @@ private:
     FlightControlMixer _mixer;
     FlightControlOrientation _orientation;
     FlightControlMixerOutput _mixerOutput = {};
+    FlightControlImuSample _lastImuSample = {};
+    uint32_t _lastDebugUpdateMs = 0;
+    uint16_t _lastUpdateDtUs = 0;
+    uint16_t _lastSampleAgeMs = 0;
     uint32_t _lastUpdateUs = 0;
     bool _sensorsReady = false;
     bool _mixerReady = false;

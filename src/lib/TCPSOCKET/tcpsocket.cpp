@@ -2,10 +2,31 @@
 
 #include "tcpsocket.h"
 #include "logging.h"
+#include "msptypes.h"
+
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+#include "devFlightControl.h"
+#endif
 
 #define TCP_PORT_BETAFLIGHT 5761 //port 5761 as used by BF configurator
 
 TCPSOCKET *TCPSOCKET::instance = NULL;
+
+static void appendU16(uint8_t *payload, uint16_t &offset, uint16_t value)
+{
+    payload[offset++] = value & 0xFF;
+    payload[offset++] = value >> 8;
+}
+
+static void appendI16(uint8_t *payload, uint16_t &offset, int16_t value)
+{
+    appendU16(payload, offset, (uint16_t)value);
+}
+
+static int16_t scaledFloatToI16(float value, float scale)
+{
+    return (int16_t)constrain((int32_t)lroundf(value * scale), -32768, 32767);
+}
 
 void TCPSOCKET::begin()
 {
@@ -33,8 +54,88 @@ void TCPSOCKET::pumpData()
         const uint16_t len = FIFOin->popSize();
         uint8_t data[len];
         FIFOin->popBytes(data, len);
-        msp2crsf->parse(data, len);
+        if (!handleLocalMspRequest(data, len))
+        {
+            msp2crsf->parse(data, len);
+        }
     }
+}
+
+bool TCPSOCKET::handleLocalMspRequest(const uint8_t *data, uint16_t len)
+{
+    if (len < 9 || data[0] != '$' || data[1] != 'X' || data[2] != '<')
+    {
+        return false;
+    }
+
+    const uint16_t function = (uint16_t)data[4] | ((uint16_t)data[5] << 8);
+    const uint16_t payloadLen = (uint16_t)data[6] | ((uint16_t)data[7] << 8);
+    if ((uint16_t)(payloadLen + 9) != len)
+    {
+        return false;
+    }
+
+    uint8_t crc = 0;
+    for (uint16_t i = 3; i < len - 1; i++)
+    {
+        crc = crc8_dvb_s2(crc, data[i]);
+    }
+    if (crc != data[len - 1])
+    {
+        return false;
+    }
+
+    if (function != MSP_ELRS_FC_DEBUG)
+    {
+        return false;
+    }
+
+    uint8_t payload[10];
+    uint16_t offset = 0;
+
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+    FlightControlDebugSnapshot snapshot = {};
+    flightControlGetDebugSnapshot(snapshot);
+
+    appendI16(payload, offset, scaledFloatToI16(snapshot.attitude.rollDeg, 100.0f));
+    appendI16(payload, offset, scaledFloatToI16(snapshot.attitude.pitchDeg, 100.0f));
+    appendI16(payload, offset, scaledFloatToI16(snapshot.attitude.yawDeg, 100.0f));
+    appendI16(payload, offset, scaledFloatToI16(snapshot.accelAttitude.rollDeg, 100.0f));
+    appendI16(payload, offset, scaledFloatToI16(snapshot.accelAttitude.pitchDeg, 100.0f));
+#else
+    appendI16(payload, offset, 0);
+    appendI16(payload, offset, 0);
+    appendI16(payload, offset, 0);
+    appendI16(payload, offset, 0);
+    appendI16(payload, offset, 0);
+#endif
+
+    writeMspResponse(function, payload, offset);
+    return true;
+}
+
+void TCPSOCKET::writeMspResponse(uint16_t function, const uint8_t *payload, uint16_t payloadLen)
+{
+    uint8_t frame[80];
+    uint16_t offset = 0;
+    frame[offset++] = '$';
+    frame[offset++] = 'X';
+    frame[offset++] = '>';
+    frame[offset++] = 0;
+    frame[offset++] = function & 0xFF;
+    frame[offset++] = function >> 8;
+    frame[offset++] = payloadLen & 0xFF;
+    frame[offset++] = payloadLen >> 8;
+    memcpy(&frame[offset], payload, payloadLen);
+    offset += payloadLen;
+
+    uint8_t crc = 0;
+    for (uint16_t i = 3; i < offset; i++)
+    {
+        crc = crc8_dvb_s2(crc, frame[i]);
+    }
+    frame[offset++] = crc;
+    write(frame, offset);
 }
 
 /***

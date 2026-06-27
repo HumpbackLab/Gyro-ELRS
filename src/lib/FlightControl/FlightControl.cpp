@@ -14,6 +14,7 @@ static constexpr uint32_t FC_UPDATE_INTERVAL_US = 4000;
 static constexpr float FC_MAX_ROLL_PITCH_DEG = 35.0f;
 static constexpr float FC_MAX_YAW_RATE_DPS = 180.0f;
 static constexpr float FC_COMPLEMENTARY_ALPHA = 0.98f;
+static constexpr uint16_t FC_COMPLEMENTARY_ALPHA_PERMILLE = (uint16_t)(FC_COMPLEMENTARY_ALPHA * 1000.0f);
 static constexpr float FC_STANDARD_GRAVITY = 9.80665f;
 static constexpr uint8_t FC_PID_COLUMNS = 4;
 static constexpr uint8_t FC_PID_AXES = 3;
@@ -47,23 +48,42 @@ bool FlightControlSensorBackend::read(FlightControlImuSample &sample)
         gyroSample.accelMps2.y,
         gyroSample.accelMps2.z,
     };
+    sample.timestampMs = gyroSample.timestampMs;
     sample.gyroValid = true;
     sample.accelValid = gyroSample.accelValid;
     return true;
 }
 
+static float wrapDegrees180(float angle)
+{
+    while (angle > 180.0f)
+    {
+        angle -= 360.0f;
+    }
+    while (angle < -180.0f)
+    {
+        angle += 360.0f;
+    }
+    return angle;
+}
+
 void FlightControlEstimator::reset()
 {
     _attitude = {};
+    _accelAttitude = {};
+    _attitudeValid = false;
 }
 
 void FlightControlEstimator::update(const FlightControlImuSample &sample, float dt)
 {
-    if (sample.gyroValid)
+    const bool hadAttitude = _attitudeValid;
+
+    if (sample.gyroValid && dt > 0.0f)
     {
-        _attitude.rollDeg += sample.gyroDps.x * dt;
-        _attitude.pitchDeg += sample.gyroDps.y * dt;
-        _attitude.yawDeg += sample.gyroDps.z * dt;
+        _attitude.rollDeg = wrapDegrees180(_attitude.rollDeg + sample.gyroDps.x * dt);
+        _attitude.pitchDeg = wrapDegrees180(_attitude.pitchDeg + sample.gyroDps.y * dt);
+        _attitude.yawDeg = wrapDegrees180(_attitude.yawDeg + sample.gyroDps.z * dt);
+        _attitudeValid = true;
     }
 
     if (sample.accelValid)
@@ -76,8 +96,25 @@ void FlightControlEstimator::update(const FlightControlImuSample &sample, float 
         {
             const float accelRoll = atan2f(ay, az) * 180.0f / PI;
             const float accelPitch = atan2f(-ax, sqrtf(ay * ay + az * az)) * 180.0f / PI;
-            _attitude.rollDeg = FC_COMPLEMENTARY_ALPHA * _attitude.rollDeg + (1.0f - FC_COMPLEMENTARY_ALPHA) * accelRoll;
-            _attitude.pitchDeg = FC_COMPLEMENTARY_ALPHA * _attitude.pitchDeg + (1.0f - FC_COMPLEMENTARY_ALPHA) * accelPitch;
+            _accelAttitude.rollDeg = accelRoll;
+            _accelAttitude.pitchDeg = accelPitch;
+            _accelAttitude.yawDeg = 0.0f;
+
+            if (!hadAttitude || !sample.gyroValid)
+            {
+                _attitude.rollDeg = accelRoll;
+                _attitude.pitchDeg = accelPitch;
+                _attitudeValid = true;
+            }
+            else
+            {
+                _attitude.rollDeg = wrapDegrees180(
+                    FC_COMPLEMENTARY_ALPHA * _attitude.rollDeg +
+                    (1.0f - FC_COMPLEMENTARY_ALPHA) * accelRoll);
+                _attitude.pitchDeg = wrapDegrees180(
+                    FC_COMPLEMENTARY_ALPHA * _attitude.pitchDeg +
+                    (1.0f - FC_COMPLEMENTARY_ALPHA) * accelPitch);
+            }
         }
     }
 }
@@ -200,6 +237,10 @@ void FlightControlRuntime::reset()
     _pitchAnglePid.reset();
     _yawAnglePid.reset();
     _mixerOutput = {};
+    _lastImuSample = {};
+    _lastDebugUpdateMs = 0;
+    _lastUpdateDtUs = 0;
+    _lastSampleAgeMs = 0;
     _lastUpdateUs = 0;
 }
 
@@ -242,6 +283,43 @@ bool FlightControlRuntime::loadPidBank(FlightControlPid &rollPid, FlightControlP
     return true;
 }
 
+void FlightControlRuntime::updateAttitudeOnly(uint32_t nowUs)
+{
+    if (!_sensorsReady)
+    {
+        _sensorsReady = _sensors.begin();
+    }
+    if (!_sensorsReady)
+    {
+        reset();
+        return;
+    }
+
+    if (_lastUpdateUs != 0 && (uint32_t)(nowUs - _lastUpdateUs) < FC_UPDATE_INTERVAL_US)
+    {
+        return;
+    }
+
+    const uint32_t dtUs = _lastUpdateUs == 0 ? FC_UPDATE_INTERVAL_US : (uint32_t)(nowUs - _lastUpdateUs);
+    const float dt = dtUs * 1e-6f;
+    _lastUpdateUs = nowUs;
+    _lastUpdateDtUs = (uint16_t)constrain(dtUs, 0U, 65535U);
+
+    FlightControlImuSample sample = {};
+    if (!_sensors.read(sample))
+    {
+        _sensorsReady = false;
+        reset();
+        return;
+    }
+
+    _orientation.apply(sample);
+    _lastImuSample = sample;
+    _lastDebugUpdateMs = millis();
+    _lastSampleAgeMs = sample.timestampMs == 0 ? 0 : (uint16_t)constrain((uint32_t)(_lastDebugUpdateMs - sample.timestampMs), 0U, 65535U);
+    _estimator.update(sample, dt);
+}
+
 void FlightControlRuntime::loadStickTargets(float &throttle, float &roll, float &pitch, float &yaw)
 {
     const uint16_t rollUs = CRSF_to_US(ChannelData[0]);
@@ -268,8 +346,10 @@ void FlightControlRuntime::update(uint32_t nowUs)
         return;
     }
 
-    const float dt = _lastUpdateUs == 0 ? (FC_UPDATE_INTERVAL_US * 1e-6f) : (nowUs - _lastUpdateUs) * 1e-6f;
+    const uint32_t dtUs = _lastUpdateUs == 0 ? FC_UPDATE_INTERVAL_US : (uint32_t)(nowUs - _lastUpdateUs);
+    const float dt = dtUs * 1e-6f;
     _lastUpdateUs = nowUs;
+    _lastUpdateDtUs = (uint16_t)constrain(dtUs, 0U, 65535U);
 
     FlightControlImuSample sample = {};
     if (!_sensors.read(sample))
@@ -279,6 +359,10 @@ void FlightControlRuntime::update(uint32_t nowUs)
         return;
     }
     _orientation.apply(sample);
+    _lastImuSample = sample;
+    _lastDebugUpdateMs = millis();
+    _lastSampleAgeMs = sample.timestampMs == 0 ? 0 : (uint16_t)constrain((uint32_t)(_lastDebugUpdateMs - sample.timestampMs), 0U, 65535U);
+    _estimator.update(sample, dt);
 
     float throttle;
     float rollAngleTarget;
@@ -291,7 +375,6 @@ void FlightControlRuntime::update(uint32_t nowUs)
 
     if (_angleEnabled)
     {
-        _estimator.update(sample, dt);
         rollRateTarget = _rollAnglePid.update(rollAngleTarget, _estimator.attitude().rollDeg, dt);
         pitchRateTarget = _pitchAnglePid.update(pitchAngleTarget, _estimator.attitude().pitchDeg, dt);
     }
@@ -304,6 +387,25 @@ void FlightControlRuntime::update(uint32_t nowUs)
     const float yawCorrection = _yawRatePid.update(yawRateTarget, gyroYaw, dt);
 
     _mixerOutput = _mixer.mix(throttle, rollCorrection, pitchCorrection, yawCorrection);
+}
+
+bool FlightControlRuntime::getDebugSnapshot(FlightControlDebugSnapshot &snapshot) const
+{
+    snapshot = {};
+    snapshot.imu = _lastImuSample;
+    snapshot.attitude = _estimator.attitude();
+    snapshot.accelAttitude = _estimator.accelAttitude();
+    snapshot.mixerOutput = _mixerOutput;
+    snapshot.updateTimestampMs = _lastDebugUpdateMs;
+    snapshot.updateDtUs = _lastUpdateDtUs;
+    snapshot.sampleAgeMs = _lastSampleAgeMs;
+    snapshot.complementaryAlphaPermille = FC_COMPLEMENTARY_ALPHA_PERMILLE;
+    snapshot.sensorsReady = _sensorsReady;
+    snapshot.mixerReady = _mixerReady;
+    snapshot.pidReady = _pidReady;
+    snapshot.angleEnabled = _angleEnabled;
+    snapshot.attitudeValid = _estimator.attitudeValid();
+    return _lastDebugUpdateMs != 0;
 }
 
 #endif

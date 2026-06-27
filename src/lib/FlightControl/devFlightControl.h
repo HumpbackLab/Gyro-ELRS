@@ -18,6 +18,7 @@ struct FlightControlVector3 {
 struct FlightControlImuSample {
     FlightControlVector3 gyroDps;
     FlightControlVector3 accelMps2;
+    uint32_t timestampMs;
     bool gyroValid;
     bool accelValid;
 };
@@ -33,8 +34,25 @@ struct FlightControlMixerOutput {
     uint16_t motorUs[FLIGHT_CONTROL_MAX_MOTORS];
 };
 
+struct FlightControlDebugSnapshot {
+    FlightControlImuSample imu;
+    FlightControlAttitude attitude;
+    FlightControlAttitude accelAttitude;
+    FlightControlMixerOutput mixerOutput;
+    uint32_t updateTimestampMs;
+    uint16_t updateDtUs;
+    uint16_t sampleAgeMs;
+    uint16_t complementaryAlphaPermille;
+    bool sensorsReady;
+    bool mixerReady;
+    bool pidReady;
+    bool angleEnabled;
+    bool attitudeValid;
+};
+
 const FlightControlAttitude &flightControlGetAttitude();
 const FlightControlMixerOutput &flightControlGetMixerOutput();
+bool flightControlGetDebugSnapshot(FlightControlDebugSnapshot &snapshot);
 
 #else
 #endif

@@ -36,6 +36,9 @@
 #define MSP_ELRS_BACKPACK_CONFIG            0x30
 #define MSP_ELRS_BACKPACK_CONFIG_TLM_MODE   0x31
 
+// ELRS RX flight-control debug opcodes (MSP v2 native over WiFi TCP)
+#define MSP_ELRS_FC_DEBUG                   0x0450
+
 // CRSF encapsulated msp defines
 #define ENCAPSULATED_MSP_HEADER_CRC_LEN     4
 #define ENCAPSULATED_MSP_MAX_PAYLOAD_SIZE   4

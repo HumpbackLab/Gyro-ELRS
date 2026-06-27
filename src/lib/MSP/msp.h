@@ -12,6 +12,8 @@
     return;\
   }
 
+uint8_t crc8_dvb_s2(uint8_t crc, unsigned char a);
+
 typedef enum {
     MSP_IDLE,
     MSP_HEADER_START,
