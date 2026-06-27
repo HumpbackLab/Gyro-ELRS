@@ -128,12 +128,6 @@
 #define GPIO_PIN_PWM_OUTPUTS hardware_i16_array(HARDWARE_pwm_outputs)
 #define GPIO_PIN_PWM_OUTPUTS_COUNT hardware_int(HARDWARE_pwm_outputs_count)
 
-// Flight control
-#define FC_MIXER hardware_float_array(HARDWARE_fc_mixer)
-#define FC_MIXER_COUNT hardware_int(HARDWARE_fc_mixer_count)
-#define FC_ORIENTATION hardware_float_array(HARDWARE_fc_orientation)
-#define FC_ORIENTATION_COUNT hardware_int(HARDWARE_fc_orientation_count)
-
 // VBat
 #define USE_ANALOG_VBAT
 #define GPIO_ANALOG_VBAT hardware_pin(HARDWARE_vbat)

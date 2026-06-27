@@ -751,6 +751,7 @@ void RxConfig::Load()
     UpgradeEepromV6();
     UpgradeEepromV7V8();
     UpgradeEepromV9();
+    UpgradeEepromV10();
     memcpy(m_flightControlRatePidPending, m_config.flightControlRatePid, sizeof(m_flightControlRatePidPending));
     memcpy(m_flightControlAnglePidPending, m_config.flightControlAnglePid, sizeof(m_flightControlAnglePidPending));
     m_flightControlAngleModePending = m_config.flightControlAngleMode != 0;
@@ -950,6 +951,44 @@ void RxConfig::UpgradeEepromV9()
         m_config.teamracePitMode = v9Config.teamracePitMode;
         m_config.targetSysId = v9Config.targetSysId;
         m_config.sourceSysId = v9Config.sourceSysId;
+    }
+}
+
+// ========================================================
+// V10 Upgrade
+
+void RxConfig::UpgradeEepromV10()
+{
+    v10_rx_config_t v10Config;
+    m_eeprom->Get(0, v10Config);
+
+    if ((v10Config.version & ~CONFIG_MAGIC_MASK) == 10)
+    {
+        memcpy(m_config.uid, v10Config.uid, sizeof(m_config.uid));
+        m_config.unused_padding = v10Config.unused_padding;
+        m_config.serial1Protocol = v10Config.serial1Protocol;
+        m_config.serial1Protocol_unused = v10Config.serial1Protocol_unused;
+        m_config.flash_discriminator = v10Config.flash_discriminator;
+        m_config.vbat.scale = v10Config.vbat.scale;
+        m_config.vbat.offset = v10Config.vbat.offset;
+        m_config.bindStorage = v10Config.bindStorage;
+        m_config.power = v10Config.power;
+        m_config.antennaMode = v10Config.antennaMode;
+        m_config.powerOnCounter = v10Config.powerOnCounter;
+        m_config.forceTlmOff = v10Config.forceTlmOff;
+        m_config.rateInitialIdx = v10Config.rateInitialIdx;
+        m_config.modelId = v10Config.modelId;
+        m_config.serialProtocol = v10Config.serialProtocol;
+        m_config.failsafeMode = v10Config.failsafeMode;
+        memcpy(m_config.pwmChannels, v10Config.pwmChannels, sizeof(m_config.pwmChannels));
+        m_config.teamraceChannel = v10Config.teamraceChannel;
+        m_config.teamracePosition = v10Config.teamracePosition;
+        m_config.teamracePitMode = v10Config.teamracePitMode;
+        m_config.targetSysId = v10Config.targetSysId;
+        m_config.sourceSysId = v10Config.sourceSysId;
+        memcpy(m_config.flightControlRatePid, v10Config.flightControlRatePid, sizeof(m_config.flightControlRatePid));
+        memcpy(m_config.flightControlAnglePid, v10Config.flightControlAnglePid, sizeof(m_config.flightControlAnglePid));
+        m_config.flightControlAngleMode = v10Config.flightControlAngleMode;
     }
 }
 
@@ -1168,6 +1207,12 @@ RxConfig::SetDefaults(bool commit)
     memcpy(m_flightControlAnglePidPending, m_config.flightControlAnglePid, sizeof(m_flightControlAnglePidPending));
     m_flightControlAngleModePending = m_config.flightControlAngleMode != 0;
     m_flightControlModified = false;
+    m_config.flightControlMixerCount = 0;
+    memset(m_config.flightControlMixer, 0, sizeof(m_config.flightControlMixer));
+    for (uint8_t i = 0; i < FC_ORIENTATION_VALUE_COUNT; ++i)
+    {
+        m_config.flightControlOrientation[i] = (i % 4) == 0 ? 1.0f : 0.0f;
+    }
 
     if (commit)
     {
@@ -1338,6 +1383,58 @@ void RxConfig::SetFlightControlAngleMode(bool enabled)
     {
         m_flightControlAngleModePending = enabled;
         m_flightControlModified = true;
+    }
+}
+
+void RxConfig::SetFlightControlMixer(const float *values, uint8_t count)
+{
+    const uint8_t clippedCount = min(count, FC_MIXER_VALUE_COUNT);
+    bool changed = m_config.flightControlMixerCount != clippedCount;
+
+    for (uint8_t i = 0; i < clippedCount; ++i)
+    {
+        if (m_config.flightControlMixer[i] != values[i])
+        {
+            changed = true;
+        }
+        m_config.flightControlMixer[i] = values[i];
+    }
+    for (uint8_t i = clippedCount; i < FC_MIXER_VALUE_COUNT; ++i)
+    {
+        if (m_config.flightControlMixer[i] != 0.0f)
+        {
+            changed = true;
+            m_config.flightControlMixer[i] = 0.0f;
+        }
+    }
+
+    if (changed)
+    {
+        m_config.flightControlMixerCount = clippedCount;
+        m_modified = true;
+    }
+}
+
+void RxConfig::SetFlightControlOrientation(const float *values, uint8_t count)
+{
+    if (count < FC_ORIENTATION_VALUE_COUNT)
+    {
+        return;
+    }
+
+    bool changed = false;
+    for (uint8_t i = 0; i < FC_ORIENTATION_VALUE_COUNT; ++i)
+    {
+        if (m_config.flightControlOrientation[i] != values[i])
+        {
+            changed = true;
+            m_config.flightControlOrientation[i] = values[i];
+        }
+    }
+
+    if (changed)
+    {
+        m_modified = true;
     }
 }
 

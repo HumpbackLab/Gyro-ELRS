@@ -15,10 +15,8 @@ static constexpr float FC_MAX_ROLL_PITCH_DEG = 35.0f;
 static constexpr float FC_MAX_YAW_RATE_DPS = 180.0f;
 static constexpr float FC_COMPLEMENTARY_ALPHA = 0.98f;
 static constexpr float FC_STANDARD_GRAVITY = 9.80665f;
-static constexpr uint8_t FC_MIXER_COLUMNS = 4;
 static constexpr uint8_t FC_PID_COLUMNS = 4;
 static constexpr uint8_t FC_PID_AXES = 3;
-static constexpr uint8_t FC_ORIENTATION_VALUES = 9;
 // RX config stores PID values in centi-units for LUA/CRSF int16 transport;
 // restore them to the same floating-point units shown in the WebUI.
 static constexpr float FC_PID_CONFIG_SCALE = 0.01f;
@@ -118,9 +116,8 @@ float FlightControlPid::update(float target, float measurement, float dt)
 
 bool FlightControlMixer::begin()
 {
-#if defined(FC_MIXER) && defined(FC_MIXER_COUNT)
-    const int count = FC_MIXER_COUNT;
-    _mix = FC_MIXER;
+    const int count = config.GetFlightControlMixerCount();
+    _mix = config.GetFlightControlMixer();
     if (!_mix || count <= 0 || count % FC_MIXER_COLUMNS != 0)
     {
         _motorCount = 0;
@@ -129,11 +126,6 @@ bool FlightControlMixer::begin()
 
     _motorCount = constrain(count / FC_MIXER_COLUMNS, 0, FLIGHT_CONTROL_MAX_MOTORS);
     return _motorCount > 0;
-#else
-    _motorCount = 0;
-    _mix = nullptr;
-    return false;
-#endif
 }
 
 FlightControlMixerOutput FlightControlMixer::mix(float throttle, float roll, float pitch, float yaw) const
@@ -157,18 +149,16 @@ FlightControlMixerOutput FlightControlMixer::mix(float throttle, float roll, flo
 
 bool FlightControlOrientation::begin()
 {
-#if defined(FC_ORIENTATION) && defined(FC_ORIENTATION_COUNT)
-    const float *orientation = FC_ORIENTATION;
-    if (!orientation || FC_ORIENTATION_COUNT < FC_ORIENTATION_VALUES)
+    const float *orientation = config.GetFlightControlOrientation();
+    if (!orientation)
     {
         return true;
     }
 
-    for (uint8_t i = 0; i < FC_ORIENTATION_VALUES; i++)
+    for (uint8_t i = 0; i < FC_ORIENTATION_VALUE_COUNT; i++)
     {
         _matrix[i] = orientation[i];
     }
-#endif
     return true;
 }
 
@@ -219,10 +209,7 @@ bool FlightControlRuntime::refreshReadyState()
     {
         _sensorsReady = _sensors.begin();
     }
-    if (!_mixerReady)
-    {
-        _mixerReady = _mixer.begin();
-    }
+    _mixerReady = _mixer.begin();
     _pidReady = loadPidParameters();
     return ready();
 }

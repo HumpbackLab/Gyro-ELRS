@@ -299,6 +299,7 @@ static void luaparamFlightControlRatePid(struct luaPropertiesCommon *item, uint8
   if (index >= 0 && luaGetUpdateValueInt16(&value))
   {
     config.SetFlightControlRatePid(index, value);
+    config.CommitFlightControlChanges();
   }
 }
 
@@ -310,6 +311,7 @@ static void luaparamFlightControlAnglePid(struct luaPropertiesCommon *item, uint
   if (index >= 0 && luaGetUpdateValueInt16(&value))
   {
     config.SetFlightControlAnglePid(index, value);
+    config.CommitFlightControlChanges();
   }
 }
 
@@ -731,6 +733,7 @@ static void registerLuaParameters()
   registerLUAParameter(&luaFlightControlAngleMode, [](struct luaPropertiesCommon* item, uint8_t arg) {
     UNUSED(item);
     config.SetFlightControlAngleMode(arg != 0);
+    config.CommitFlightControlChanges();
   }, luaFlightControlFolder.common.id);
   registerLUAParameter(&luaFlightControlSave, &luaparamFlightControlSave, luaFlightControlFolder.common.id);
   registerLUAParameter(&luaFlightControlRateFolder, nullptr, luaFlightControlFolder.common.id);
@@ -816,10 +819,13 @@ static int event()
 
 #if defined(HAS_BASIC_FLIGHT_CONTROL)
   setLuaTextSelectionValue(&luaFlightControlAngleMode, config.GetFlightControlAngleMode() ? 1 : 0);
-  for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)
+  if (!config.IsFlightControlModified())
   {
-    setLuaInt16Value(&luaFlightControlRatePid[i], config.GetFlightControlRatePid()[i]);
-    setLuaInt16Value(&luaFlightControlAnglePid[i], config.GetFlightControlAnglePid()[i]);
+    for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)
+    {
+      setLuaInt16Value(&luaFlightControlRatePid[i], config.GetFlightControlRatePid()[i]);
+      setLuaInt16Value(&luaFlightControlAnglePid[i], config.GetFlightControlAnglePid()[i]);
+    }
   }
 #endif
 

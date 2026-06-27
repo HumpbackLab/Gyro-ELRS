@@ -201,3 +201,51 @@ typedef struct __attribute__((packed)) {
     uint8_t     targetSysId;
     uint8_t     sourceSysId;
 } v9_rx_config_t;
+
+// V10 added flight-control PID fields, angle mode and PWM mixerMode.
+typedef union {
+    struct {
+        uint32_t failsafe:10,
+                 inputChannel:4,
+                 inverted:1,
+                 mode:4,
+                 narrow:1,
+                 failsafeMode:2,
+                 signalPolarityInverted:1,
+                 mixerMode:1,
+                 unused:8;
+    } val;
+    uint32_t raw;
+} v10_rx_config_pwm_t;
+
+typedef struct __attribute__((packed)) {
+    uint32_t    version;
+    uint8_t     uid[UID_LEN];
+    uint8_t     unused_padding;
+    uint8_t     serial1Protocol:4,
+                serial1Protocol_unused:4;
+    uint32_t    flash_discriminator;
+    struct __attribute__((packed)) {
+        uint16_t    scale;
+        int16_t     offset;
+    } vbat;
+    uint8_t     bindStorage:2,
+                power:4,
+                antennaMode:2;
+    uint8_t     powerOnCounter:3,
+                forceTlmOff:1,
+                rateInitialIdx:4;
+    uint8_t     modelId;
+    uint8_t     serialProtocol:4,
+                failsafeMode:2,
+                unused:2;
+    v10_rx_config_pwm_t pwmChannels[16] __attribute__((aligned(4)));
+    uint8_t     teamraceChannel:4,
+                teamracePosition:3,
+                teamracePitMode:1;
+    uint8_t     targetSysId;
+    uint8_t     sourceSysId;
+    int16_t     flightControlRatePid[12];
+    int16_t     flightControlAnglePid[12];
+    uint8_t     flightControlAngleMode;
+} v10_rx_config_t;

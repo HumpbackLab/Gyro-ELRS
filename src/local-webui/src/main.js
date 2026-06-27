@@ -577,7 +577,7 @@ async function loadDevice() {
   state.extraMixerRows = 0;
   state.originalUid = bytesToList(configResponse?.config?.uid);
   state.originalUidType = configResponse?.config?.uidtype || '';
-  const orient = (hardwareResponse?.fc_orientation || []).length === 9 ? hardwareResponse.fc_orientation : (state.hardware?.fc_orientation || []);
+  const orient = (configResponse?.config?.fc_orientation || []).length === 9 ? configResponse.config.fc_orientation : [];
   const [roll, pitch, yaw] = installEulerFromOrientationMatrix(orient);
   state.eulerRoll = roll;
   state.eulerPitch = pitch;
@@ -594,11 +594,6 @@ function configValue(key, fallback) {
 
 function optionValue(key, fallback) {
   const value = options()[key];
-  return value === undefined ? fallback : value;
-}
-
-function hardwareValue(key, fallback) {
-  const value = hardware()[key];
   return value === undefined ? fallback : value;
 }
 
@@ -689,20 +684,14 @@ async function saveFlight(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const nextConfig = {...config()};
-  const nextHardware = {...hardware(), customised: true};
   await runBusy(async () => {
     nextConfig.fc_angle_enabled = form.fc_angle_enabled.checked;
     nextConfig.fc_rate_pid = readNumGrid(form, 'fc_rate_pid', 3, 4);
     nextConfig.fc_angle_pid = readNumGrid(form, 'fc_angle_pid', 3, 4);
+    nextConfig.fc_mixer = readNumGrid(form, 'fc_mixer', motorCount(), 4);
+    nextConfig.fc_orientation = orientationMatrixFromInstallEuler(state.eulerRoll, state.eulerPitch, state.eulerYaw);
     delete nextConfig.pwm;
-    nextHardware.fc_mixer = readNumGrid(form, 'fc_mixer', motorCount(), 4);
-    nextHardware.fc_orientation = orientationMatrixFromInstallEuler(state.eulerRoll, state.eulerPitch, state.eulerYaw);
-    delete nextHardware.fc_pid;
-    delete nextHardware.fc_rate_pid;
-    delete nextHardware.fc_angle_pid;
-    delete nextHardware.fc_angle_enabled;
     await apiFetch('/config', {method: 'POST', body: JSON.stringify(nextConfig)});
-    await apiFetch('/hardware.json', {method: 'POST', body: JSON.stringify(nextHardware)});
     state.extraMixerRows = 0;
     await loadDevice();
   }, 'Flight control settings saved');
@@ -1107,10 +1096,9 @@ function renderPwm() {
 }
 
 function motorCount() {
-  const h = hardware();
-  const mixerData = h.fc_mixer || [];
-  const hwCount = hardwareValue('fc_mixer_count', 0);
-  const base = hwCount || Math.max(1, Math.floor(mixerData.length / 4) || 1);
+  const mixerData = configValue('fc_mixer', []);
+  const configCount = configValue('fc_mixer_count', 0);
+  const base = configCount ? Math.floor(configCount / 4) : Math.max(1, Math.floor(mixerData.length / 4) || 1);
   return base + (state.extraMixerRows || 0);
 }
 
@@ -1191,11 +1179,10 @@ function boardPreviewTransform(roll, pitch, yaw) {
 }
 
 function renderFlight() {
-  const h = hardware();
   const motors = motorCount();
   const ratePid = configValue('fc_rate_pid', []);
   const anglePid = configValue('fc_angle_pid', []);
-  const mixer = h.fc_mixer || [];
+  const mixer = configValue('fc_mixer', []);
   const angleEnabled = configValue('fc_angle_enabled', false);
   const roll = state.eulerRoll ?? 0;
   const pitch = state.eulerPitch ?? 0;

@@ -357,6 +357,55 @@ static void JsonPidToConfig(JsonVariant &json, const char *key, void (*setter)(u
     setter(i, FlightControlPidFromJson(array[i]));
   }
 }
+
+static void FlightControlFloatArrayToJson(JsonObject &json, const char *key, const float *values, uint8_t count)
+{
+  JsonArray array = json[key].to<JsonArray>();
+  for (uint8_t i = 0; i < count; ++i)
+  {
+    array.add(values[i]);
+  }
+}
+
+static void JsonFlightControlMixerToConfig(JsonVariant &json)
+{
+  if (!json.containsKey("fc_mixer"))
+  {
+    return;
+  }
+
+  JsonArray array = json["fc_mixer"].as<JsonArray>();
+  uint8_t count = min(array.size(), (size_t)FC_MIXER_VALUE_COUNT);
+  count -= count % FC_MIXER_COLUMNS;
+
+  float mixer[FC_MIXER_VALUE_COUNT] = {};
+  for (uint8_t i = 0; i < count; ++i)
+  {
+    mixer[i] = array[i].as<float>();
+  }
+  config.SetFlightControlMixer(mixer, count);
+}
+
+static void JsonFlightControlOrientationToConfig(JsonVariant &json)
+{
+  if (!json.containsKey("fc_orientation"))
+  {
+    return;
+  }
+
+  JsonArray array = json["fc_orientation"].as<JsonArray>();
+  if (array.size() < FC_ORIENTATION_VALUE_COUNT)
+  {
+    return;
+  }
+
+  float orientation[FC_ORIENTATION_VALUE_COUNT] = {};
+  for (uint8_t i = 0; i < FC_ORIENTATION_VALUE_COUNT; ++i)
+  {
+    orientation[i] = array[i].as<float>();
+  }
+  config.SetFlightControlOrientation(orientation, FC_ORIENTATION_VALUE_COUNT);
+}
 #endif
 
 static void GetConfiguration(AsyncWebServerRequest *request)
@@ -443,6 +492,9 @@ static void GetConfiguration(AsyncWebServerRequest *request)
     JsonObject configJson = json["config"];
     FlightControlPidToJson(configJson, "fc_rate_pid", config.GetFlightControlRatePid());
     FlightControlPidToJson(configJson, "fc_angle_pid", config.GetFlightControlAnglePid());
+    FlightControlFloatArrayToJson(configJson, "fc_mixer", config.GetFlightControlMixer(), config.GetFlightControlMixerCount());
+    configJson["fc_mixer_count"] = config.GetFlightControlMixerCount();
+    FlightControlFloatArrayToJson(configJson, "fc_orientation", config.GetFlightControlOrientation(), FC_ORIENTATION_VALUE_COUNT);
     #if defined(GPIO_PIN_PWM_OUTPUTS)
     for (int ch=0; ch<GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
     {
@@ -692,6 +744,8 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
     config.SetFlightControlAngleMode(json["fc_angle_enabled"] | false);
   }
   config.CommitFlightControlChanges();
+  JsonFlightControlMixerToConfig(json);
+  JsonFlightControlOrientationToConfig(json);
 
   config.Commit();
   request->send(200, "text/plain", "Configuration updated");
