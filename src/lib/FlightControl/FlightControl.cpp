@@ -24,7 +24,6 @@ static constexpr uint8_t FC_ORIENTATION_VALUES = 9;
 static constexpr float FC_PID_CONFIG_SCALE = 0.01f;
 // Mixer coefficients produce an arbitrary summed control value. Convert that
 // final mixer sum into a PWM pulse-width offset in microseconds.
-static constexpr float FC_MIXER_OUTPUT_US_SCALE = 1e-3f;
 
 bool FlightControlSensorBackend::begin()
 {
@@ -151,7 +150,7 @@ FlightControlMixerOutput FlightControlMixer::mix(float throttle, float roll, flo
             pitch * _mix[offset + 2] +
             yaw * _mix[offset + 3];
         // PWM output is absolute pulse width: base 1000us plus scaled mixer offset.
-        output.motorUs[i] = (uint16_t)constrain(1000.0f + motor * FC_MIXER_OUTPUT_US_SCALE, 1000.0f, 2000.0f);
+        output.motorUs[i] = (uint16_t)constrain(1000.0f + motor, 1000.0f, 2000.0f);
     }
     return output;
 }
@@ -263,7 +262,7 @@ void FlightControlRuntime::loadStickTargets(float &throttle, float &roll, float 
     const uint16_t throttleUs = CRSF_to_US(ChannelData[2]);
     const uint16_t yawUs = CRSF_to_US(ChannelData[3]);
 
-    throttle = constrain((throttleUs - 988.0f) / (2012.0f - 988.0f), 0.0f, 1.0f);
+    throttle = constrain((throttleUs - 988.0f) / (2012.0f - 988.0f), 0.0f, 1.0f) * 1000;
     roll = constrain((rollUs - 1500.0f) / 500.0f, -1.0f, 1.0f) * FC_MAX_ROLL_PITCH_DEG;
     pitch = constrain((pitchUs - 1500.0f) / 500.0f, -1.0f, 1.0f) * FC_MAX_ROLL_PITCH_DEG;
     yaw = constrain((yawUs - 1500.0f) / 500.0f, -1.0f, 1.0f) * FC_MAX_YAW_RATE_DPS;

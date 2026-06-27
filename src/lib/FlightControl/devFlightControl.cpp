@@ -4,6 +4,7 @@
 
 #include "FlightControl.h"
 #include "common.h"
+#include "crsf_protocol.h"
 #include "devServoOutput.h"
 #include <Arduino.h>
 
@@ -35,8 +36,31 @@ static int event()
     return DURATION_IMMEDIATELY;
 }
 
+static bool rcInputReady()
+{
+    if (connectionState != connected || !connectionHasModelMatch || !teamraceHasModelMatch)
+    {
+        return false;
+    }
+
+    for (uint8_t i = 0; i < 4; ++i)
+    {
+        if (ChannelData[i] < CRSF_CHANNEL_VALUE_MIN || ChannelData[i] > CRSF_CHANNEL_VALUE_MAX)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 static int timeout()
 {
+    if (!rcInputReady())
+    {
+        runtime.reset();
+        return FC_READY_RETRY_INTERVAL_MS;
+    }
+
     runtime.update(micros());
     if (runtime.ready())
     {

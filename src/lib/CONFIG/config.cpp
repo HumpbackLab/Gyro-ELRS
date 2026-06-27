@@ -1111,23 +1111,6 @@ RxConfig::SetAntennaMode(uint8_t antennaMode)
 void
 RxConfig::SetDefaults(bool commit)
 {
-    auto loadPidDefaults = [](int16_t *dest, const float *src, int count)
-    {
-        memset(dest, 0, sizeof(int16_t) * FC_PID_TERM_COUNT);
-        if (!src || count < FC_PID_TERM_COUNT)
-        {
-            return;
-        }
-
-        for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)
-        {
-            // Store hardware/WebUI PID defaults as centi-units in int16 config
-            // so CRSF/LUA integer parameters can preserve two decimal places.
-            const float scaled = src[i] * 100.0f;
-            dest[i] = (int16_t)(scaled >= 0.0f ? scaled + 0.5f : scaled - 0.5f);
-        }
-    };
-
     // Reset everything to 0/false and then just set anything that zero is not appropriate
     memset(&m_config, 0, sizeof(m_config));
 
@@ -1179,20 +1162,6 @@ RxConfig::SetDefaults(bool commit)
 
 #if defined(RCVR_INVERT_TX)
     m_config.serialProtocol = PROTOCOL_INVERTED_CRSF;
-#endif
-
-#if defined(FC_RATE_PID) && defined(FC_RATE_PID_COUNT)
-    loadPidDefaults(m_config.flightControlRatePid, FC_RATE_PID, FC_RATE_PID_COUNT);
-#elif defined(FC_PID) && defined(FC_PID_COUNT)
-    loadPidDefaults(m_config.flightControlRatePid, FC_PID, FC_PID_COUNT);
-#endif
-
-#if defined(FC_ANGLE_PID) && defined(FC_ANGLE_PID_COUNT)
-    loadPidDefaults(m_config.flightControlAnglePid, FC_ANGLE_PID, FC_ANGLE_PID_COUNT);
-#endif
-
-#if defined(FC_ANGLE_ENABLED)
-    m_config.flightControlAngleMode = FC_ANGLE_ENABLED ? 1 : 0;
 #endif
 
     memcpy(m_flightControlRatePidPending, m_config.flightControlRatePid, sizeof(m_flightControlRatePidPending));

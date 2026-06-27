@@ -634,6 +634,7 @@ async function saveModel(event) {
     'sbus-failsafe': intOrDefault(data['sbus-failsafe'], modelDefaults['sbus-failsafe']),
     'force-tlm': data['force-tlm'] ? 1 : 0,
   };
+  delete payload.pwm;
   await runBusy(async () => {
     await apiFetch('/config', {method: 'POST', body: JSON.stringify(payload)});
     await loadDevice();
@@ -687,17 +688,24 @@ async function savePwm(event) {
 async function saveFlight(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const next = {...hardware(), customised: true};
+  const nextConfig = {...config()};
+  const nextHardware = {...hardware(), customised: true};
   await runBusy(async () => {
-    next.fc_angle_enabled = form.fc_angle_enabled.checked;
-    next.fc_rate_pid = readNumGrid(form, 'fc_rate_pid', 3, 4);
-    next.fc_angle_pid = readNumGrid(form, 'fc_angle_pid', 3, 4);
-    next.fc_mixer = readNumGrid(form, 'fc_mixer', motorCount(), 4);
-    next.fc_orientation = orientationMatrixFromInstallEuler(state.eulerRoll, state.eulerPitch, state.eulerYaw);
-    await apiFetch('/hardware.json', {method: 'POST', body: JSON.stringify(next)});
+    nextConfig.fc_angle_enabled = form.fc_angle_enabled.checked;
+    nextConfig.fc_rate_pid = readNumGrid(form, 'fc_rate_pid', 3, 4);
+    nextConfig.fc_angle_pid = readNumGrid(form, 'fc_angle_pid', 3, 4);
+    delete nextConfig.pwm;
+    nextHardware.fc_mixer = readNumGrid(form, 'fc_mixer', motorCount(), 4);
+    nextHardware.fc_orientation = orientationMatrixFromInstallEuler(state.eulerRoll, state.eulerPitch, state.eulerYaw);
+    delete nextHardware.fc_pid;
+    delete nextHardware.fc_rate_pid;
+    delete nextHardware.fc_angle_pid;
+    delete nextHardware.fc_angle_enabled;
+    await apiFetch('/config', {method: 'POST', body: JSON.stringify(nextConfig)});
+    await apiFetch('/hardware.json', {method: 'POST', body: JSON.stringify(nextHardware)});
     state.extraMixerRows = 0;
     await loadDevice();
-  }, 'Flight control hardware settings saved');
+  }, 'Flight control settings saved');
 }
 
 function sleep(ms) {
@@ -937,7 +945,7 @@ function renderStatus() {
         <div class="metric"><span>UID Type</span><strong>${escapeHtml(c.uidtype || 'unknown')}</strong></div>
         <div class="metric"><span>Model ID</span><strong>${escapeHtml(c.modelid ?? '255')}</strong></div>
         <div class="metric"><span>Serial Protocol</span><strong>${escapeHtml(serialProtocols.find(([v]) => v === String(c['serial-protocol']))?.[1] || c['serial-protocol'] || 'CRSF')}</strong></div>
-        <div class="metric"><span>Flight Angle Loop</span><strong>${h.fc_angle_enabled ? 'Enabled' : 'Disabled'}</strong></div>
+        <div class="metric"><span>Flight Angle Loop</span><strong>${configValue('fc_angle_enabled', false) ? 'Enabled' : 'Disabled'}</strong></div>
       </section>
       <section class="panel">
         <h2>Sensors</h2>
@@ -1185,10 +1193,10 @@ function boardPreviewTransform(roll, pitch, yaw) {
 function renderFlight() {
   const h = hardware();
   const motors = motorCount();
-  const ratePid = h.fc_rate_pid || h.fc_pid || [];
-  const anglePid = h.fc_angle_pid || [];
+  const ratePid = configValue('fc_rate_pid', []);
+  const anglePid = configValue('fc_angle_pid', []);
   const mixer = h.fc_mixer || [];
-  const angleEnabled = hardwareValue('fc_angle_enabled', false);
+  const angleEnabled = configValue('fc_angle_enabled', false);
   const roll = state.eulerRoll ?? 0;
   const pitch = state.eulerPitch ?? 0;
   const yaw = state.eulerYaw ?? 0;

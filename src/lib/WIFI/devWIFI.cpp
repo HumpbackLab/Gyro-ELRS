@@ -326,6 +326,39 @@ static const char *GetConfigUidType(const JsonObject json)
 #endif
 }
 
+#if defined(TARGET_RX)
+static void FlightControlPidToJson(JsonObject &json, const char *key, const int16_t *pid)
+{
+  JsonArray array = json[key].to<JsonArray>();
+  for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)
+  {
+    array.add(pid[i] * 0.01f);
+  }
+}
+
+static int16_t FlightControlPidFromJson(JsonVariant value)
+{
+  const float scaled = value.as<float>() * 100.0f;
+  const long rounded = (long)(scaled >= 0.0f ? scaled + 0.5f : scaled - 0.5f);
+  return (int16_t)constrain(rounded, -32768L, 32767L);
+}
+
+static void JsonPidToConfig(JsonVariant &json, const char *key, void (*setter)(uint8_t, int16_t))
+{
+  if (!json.containsKey(key))
+  {
+    return;
+  }
+
+  JsonArray array = json[key].as<JsonArray>();
+  const size_t count = min(array.size(), (size_t)FC_PID_TERM_COUNT);
+  for (uint8_t i = 0; i < count; ++i)
+  {
+    setter(i, FlightControlPidFromJson(array[i]));
+  }
+}
+#endif
+
 static void GetConfiguration(AsyncWebServerRequest *request)
 {
   bool exportMode = request->hasArg("export");
@@ -406,6 +439,10 @@ static void GetConfiguration(AsyncWebServerRequest *request)
     json["config"]["modelid"] = config.GetModelId();
     json["config"]["force-tlm"] = config.GetForceTlmOff();
     json["config"]["vbind"] = config.GetBindStorage();
+    json["config"]["fc_angle_enabled"] = config.GetFlightControlAngleMode();
+    JsonObject configJson = json["config"];
+    FlightControlPidToJson(configJson, "fc_rate_pid", config.GetFlightControlRatePid());
+    FlightControlPidToJson(configJson, "fc_angle_pid", config.GetFlightControlAnglePid());
     #if defined(GPIO_PIN_PWM_OUTPUTS)
     for (int ch=0; ch<GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
     {
@@ -643,6 +680,18 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
     config.SetPwmChannelRaw(channel, val);
   }
   #endif
+
+  JsonPidToConfig(json, "fc_rate_pid", [](uint8_t index, int16_t value) {
+    config.SetFlightControlRatePid(index, value);
+  });
+  JsonPidToConfig(json, "fc_angle_pid", [](uint8_t index, int16_t value) {
+    config.SetFlightControlAnglePid(index, value);
+  });
+  if (json.containsKey("fc_angle_enabled"))
+  {
+    config.SetFlightControlAngleMode(json["fc_angle_enabled"] | false);
+  }
+  config.CommitFlightControlChanges();
 
   config.Commit();
   request->send(200, "text/plain", "Configuration updated");
