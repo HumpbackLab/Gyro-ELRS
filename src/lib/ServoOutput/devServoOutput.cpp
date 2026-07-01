@@ -28,6 +28,23 @@ static constexpr uint32_t FAILSAFE_ABS_TIMEOUT_MS = 1000U;
 static uint16_t simulatedChannels[16] = {};
 static bool simulatedChannelsDirty = false;
 
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+static bool flightControlMotorOutputEnabled()
+{
+    if (!config.GetFlightControlArmMode())
+    {
+        return true;
+    }
+
+    if (connectionState == wifiUpdate && simulatedChannels[4] != 0)
+    {
+        return simulatedChannels[4] >= 1500;
+    }
+
+    return CRSF_to_BIT(ChannelData[4]);
+}
+#endif
+
 void ICACHE_RAM_ATTR servoNewChannelsAvailable()
 {
     newChannelsAvailable = true;
@@ -153,6 +170,7 @@ static void servosUpdate(unsigned long now)
         lastUpdate = now;
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
         const FlightControlMixerOutput &mixerOutput = flightControlGetMixerOutput();
+        const bool motorOutputEnabled = flightControlMotorOutputEnabled();
 #endif
         for (int ch = 0 ; ch < GPIO_PIN_PWM_OUTPUTS_COUNT ; ++ch)
         {
@@ -163,7 +181,20 @@ static void servosUpdate(unsigned long now)
             {
                 if (ch < mixerOutput.motorCount)
                 {
-                    servoWrite(ch, mixerOutput.motorUs[ch]);
+                    if (motorOutputEnabled)
+                    {
+                        servoWrite(ch, mixerOutput.motorUs[ch]);
+                    }
+                    else
+                    {
+                        constexpr unsigned SERVO_FAILSAFE_MIN = 988U;
+                        if (chConfig->val.failsafeMode == PWMFAILSAFE_SET_POSITION) {
+                            servoWrite(ch, chConfig->val.failsafe + SERVO_FAILSAFE_MIN);
+                        }
+                        else if (chConfig->val.failsafeMode == PWMFAILSAFE_NO_PULSES) {
+                            servoWrite(ch, 0);
+                        }
+                    }
                 }
                 continue;
             }

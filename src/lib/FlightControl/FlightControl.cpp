@@ -230,18 +230,23 @@ void FlightControlRuntime::begin()
 void FlightControlRuntime::reset()
 {
     _estimator.reset();
-    _rollRatePid.reset();
-    _pitchRatePid.reset();
-    _yawRatePid.reset();
-    _rollAnglePid.reset();
-    _pitchAnglePid.reset();
-    _yawAnglePid.reset();
+    resetPidState();
     _mixerOutput = {};
     _lastImuSample = {};
     _lastDebugUpdateMs = 0;
     _lastUpdateDtUs = 0;
     _lastSampleAgeMs = 0;
     _lastUpdateUs = 0;
+}
+
+void FlightControlRuntime::resetPidState()
+{
+    _rollRatePid.reset();
+    _pitchRatePid.reset();
+    _yawRatePid.reset();
+    _rollAnglePid.reset();
+    _pitchAnglePid.reset();
+    _yawAnglePid.reset();
 }
 
 bool FlightControlRuntime::refreshReadyState()
@@ -363,6 +368,12 @@ void FlightControlRuntime::update(uint32_t nowUs)
     _lastDebugUpdateMs = millis();
     _lastSampleAgeMs = sample.timestampMs == 0 ? 0 : (uint16_t)constrain((uint32_t)(_lastDebugUpdateMs - sample.timestampMs), 0U, 65535U);
     _estimator.update(sample, dt);
+
+    if (config.GetFlightControlArmMode() && !CRSF_to_BIT(ChannelData[4]))
+    {
+        resetPidState();
+        return;
+    }
 
     float throttle;
     float rollAngleTarget;

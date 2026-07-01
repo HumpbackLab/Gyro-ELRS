@@ -291,6 +291,7 @@ public:
     const int16_t *GetFlightControlRatePid() const { return m_flightControlRatePidPending; }
     const int16_t *GetFlightControlAnglePid() const { return m_flightControlAnglePidPending; }
     bool GetFlightControlAngleMode() const { return m_flightControlAngleModePending; }
+    bool GetFlightControlArmMode() const { return m_flightControlArmModePending; }
     const float *GetFlightControlMixer() const { return m_config.flightControlMixer; }
     uint8_t GetFlightControlMixerCount() const { return m_config.flightControlMixerCount; }
     const float *GetFlightControlOrientation() const { return m_config.flightControlOrientation; }
@@ -324,6 +325,7 @@ public:
     void SetFlightControlRatePid(uint8_t index, int16_t value);
     void SetFlightControlAnglePid(uint8_t index, int16_t value);
     void SetFlightControlAngleMode(bool enabled);
+    void SetFlightControlArmMode(bool enabled);
     void SetFlightControlMixer(const float *values, uint8_t count);
     void SetFlightControlOrientation(const float *values, uint8_t count);
     void CommitFlightControlChanges();
@@ -345,6 +347,7 @@ private:
     int16_t     m_flightControlRatePidPending[FC_PID_TERM_COUNT];
     int16_t     m_flightControlAnglePidPending[FC_PID_TERM_COUNT];
     bool        m_flightControlAngleModePending;
+    bool        m_flightControlArmModePending;
     bool        m_flightControlModified;
 };
 

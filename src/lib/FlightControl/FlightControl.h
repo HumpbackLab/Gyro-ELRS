@@ -82,6 +82,7 @@ private:
     bool loadPidParameters();
     bool loadPidBank(FlightControlPid &rollPid, FlightControlPid &pitchPid, FlightControlPid &yawPid, const int16_t *pid, int count);
     void loadStickTargets(float &throttle, float &rollAngle, float &pitchAngle, float &yawRate);
+    void resetPidState();
 
     FlightControlSensorBackend _sensors;
     FlightControlEstimator _estimator;

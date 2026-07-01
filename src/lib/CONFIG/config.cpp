@@ -715,6 +715,9 @@ RxConfig::RxConfig()
 {
 }
 
+static constexpr uint8_t FC_ANGLE_MODE_BIT = bit(0);
+static constexpr uint8_t FC_ARM_MODE_BIT = bit(1);
+
 void RxConfig::Load()
 {
     m_modified = false;
@@ -730,7 +733,8 @@ void RxConfig::Load()
     {
         memcpy(m_flightControlRatePidPending, m_config.flightControlRatePid, sizeof(m_flightControlRatePidPending));
         memcpy(m_flightControlAnglePidPending, m_config.flightControlAnglePid, sizeof(m_flightControlAnglePidPending));
-        m_flightControlAngleModePending = m_config.flightControlAngleMode != 0;
+        m_flightControlAngleModePending = (m_config.flightControlAngleMode & FC_ANGLE_MODE_BIT) != 0;
+        m_flightControlArmModePending = (m_config.flightControlAngleMode & FC_ARM_MODE_BIT) != 0;
         m_flightControlModified = false;
         CheckUpdateFlashedUid(false);
         return;
@@ -754,7 +758,8 @@ void RxConfig::Load()
     UpgradeEepromV10();
     memcpy(m_flightControlRatePidPending, m_config.flightControlRatePid, sizeof(m_flightControlRatePidPending));
     memcpy(m_flightControlAnglePidPending, m_config.flightControlAnglePid, sizeof(m_flightControlAnglePidPending));
-    m_flightControlAngleModePending = m_config.flightControlAngleMode != 0;
+    m_flightControlAngleModePending = (m_config.flightControlAngleMode & FC_ANGLE_MODE_BIT) != 0;
+    m_flightControlArmModePending = (m_config.flightControlAngleMode & FC_ARM_MODE_BIT) != 0;
     m_flightControlModified = false;
     m_config.version = RX_CONFIG_VERSION | RX_CONFIG_MAGIC;
     m_modified = true;
@@ -1205,7 +1210,8 @@ RxConfig::SetDefaults(bool commit)
 
     memcpy(m_flightControlRatePidPending, m_config.flightControlRatePid, sizeof(m_flightControlRatePidPending));
     memcpy(m_flightControlAnglePidPending, m_config.flightControlAnglePid, sizeof(m_flightControlAnglePidPending));
-    m_flightControlAngleModePending = m_config.flightControlAngleMode != 0;
+    m_flightControlAngleModePending = (m_config.flightControlAngleMode & FC_ANGLE_MODE_BIT) != 0;
+    m_flightControlArmModePending = (m_config.flightControlAngleMode & FC_ARM_MODE_BIT) != 0;
     m_flightControlModified = false;
     m_config.flightControlMixerCount = 0;
     memset(m_config.flightControlMixer, 0, sizeof(m_config.flightControlMixer));
@@ -1386,6 +1392,15 @@ void RxConfig::SetFlightControlAngleMode(bool enabled)
     }
 }
 
+void RxConfig::SetFlightControlArmMode(bool enabled)
+{
+    if (m_flightControlArmModePending != enabled)
+    {
+        m_flightControlArmModePending = enabled;
+        m_flightControlModified = true;
+    }
+}
+
 void RxConfig::SetFlightControlMixer(const float *values, uint8_t count)
 {
     const uint8_t clippedCount = min(count, FC_MIXER_VALUE_COUNT);
@@ -1447,7 +1462,9 @@ void RxConfig::CommitFlightControlChanges()
 
     memcpy(m_config.flightControlRatePid, m_flightControlRatePidPending, sizeof(m_config.flightControlRatePid));
     memcpy(m_config.flightControlAnglePid, m_flightControlAnglePidPending, sizeof(m_config.flightControlAnglePid));
-    m_config.flightControlAngleMode = m_flightControlAngleModePending ? 1 : 0;
+    m_config.flightControlAngleMode =
+        (m_flightControlAngleModePending ? FC_ANGLE_MODE_BIT : 0) |
+        (m_flightControlArmModePending ? FC_ARM_MODE_BIT : 0);
     m_flightControlModified = false;
     m_modified = true;
 }

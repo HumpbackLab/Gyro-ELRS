@@ -489,6 +489,7 @@ static void GetConfiguration(AsyncWebServerRequest *request)
     json["config"]["force-tlm"] = config.GetForceTlmOff();
     json["config"]["vbind"] = config.GetBindStorage();
     json["config"]["fc_angle_enabled"] = config.GetFlightControlAngleMode();
+    json["config"]["fc_arm_enabled"] = config.GetFlightControlArmMode();
     JsonObject configJson = json["config"];
     FlightControlPidToJson(configJson, "fc_rate_pid", config.GetFlightControlRatePid());
     FlightControlPidToJson(configJson, "fc_angle_pid", config.GetFlightControlAnglePid());
@@ -742,6 +743,10 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
   if (json.containsKey("fc_angle_enabled"))
   {
     config.SetFlightControlAngleMode(json["fc_angle_enabled"] | false);
+  }
+  if (json.containsKey("fc_arm_enabled"))
+  {
+    config.SetFlightControlArmMode(json["fc_arm_enabled"] | false);
   }
   config.CommitFlightControlChanges();
   JsonFlightControlMixerToConfig(json);
