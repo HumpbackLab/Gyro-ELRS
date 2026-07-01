@@ -308,53 +308,6 @@ button:disabled {
   font-size: 14px;
 }
 
-.channel-sim-details {
-  margin-top: 12px;
-}
-
-.channel-sim-details summary {
-  cursor: pointer;
-  color: #4b5563;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 4px 0;
-}
-
-.channel-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px 12px;
-}
-
-.ch-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px 6px;
-  background: #f9fafb;
-  border-radius: 6px;
-}
-
-.ch-label {
-  font-size: 10px;
-  color: #9ca3af;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.ch-cell input[type="range"] {
-  width: 100%;
-  margin: 0;
-  accent-color: #4a90d9;
-}
-
-.ch-value {
-  font-size: 11px;
-  color: #374151;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-
 .diag-msg {
   background: #fef2f2;
   border: 1px solid #fecaca;

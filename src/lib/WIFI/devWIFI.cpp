@@ -798,27 +798,6 @@ static void WebUpdateGetTarget(AsyncWebServerRequest *request)
   request->send(response);
 }
 
-static void WebUpdateGetChannels(AsyncWebServerRequest *request)
-{
-  JsonDocument json;
-  for (int i = 0; i < 16; i++)
-  {
-    json["channels"][i] = servoGetSimulatedChannel(i);
-  }
-  AsyncResponseStream *response = request->beginResponseStream("application/json");
-  serializeJson(json, *response);
-  request->send(response);
-}
-
-static void WebUpdateSetChannels(AsyncWebServerRequest *request, JsonVariant &json)
-{
-  JsonArray arr = json["channels"].as<JsonArray>();
-  for (uint8_t i = 0; i < arr.size() && i < 16; i++){
-    servoSetSimulatedChannel(i, constrain((uint16_t)(arr[i] | 1500), (uint16_t)988, (uint16_t)2012));
-  }
-  request->send(200, "application/json", "{\"status\":\"ok\"}");
-}
-
 static void WebUpdateSendNetworks(AsyncWebServerRequest *request)
 {
   int numNetworks = WiFi.scanComplete();
@@ -1321,8 +1300,6 @@ static void startServices()
   server.on("/status.json", HTTP_OPTIONS, corsPreflightResponse);
   server.on("/access", WebUpdateAccessPoint);
   server.on("/target", WebUpdateGetTarget);
-  server.on("/channels", HTTP_GET, WebUpdateGetChannels);
-  server.on("/channels", HTTP_OPTIONS, corsPreflightResponse);
   server.on("/firmware.bin", WebUpdateGetFirmware);
 
   server.on("/update", HTTP_POST, WebUploadResponseHandler, WebUploadDataHandler);
@@ -1356,7 +1333,6 @@ static void startServices()
     server.on("/udpcontrol", HTTP_POST, WebUdpControl);
   #endif
 
-  server.addHandler(new AsyncCallbackJsonWebHandler("/channels", WebUpdateSetChannels));
   server.addHandler(new AsyncCallbackJsonWebHandler("/config", UpdateConfiguration));
   server.addHandler(new AsyncCallbackJsonWebHandler("/options.json", UpdateSettings));
   #if defined(TARGET_TX)

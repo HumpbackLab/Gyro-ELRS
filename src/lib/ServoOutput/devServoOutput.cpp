@@ -24,9 +24,6 @@ const uint8_t RMT_MAX_CHANNELS = 8;
 static bool newChannelsAvailable;
 // Absolute max failsafe time if no update is received, regardless of LQ
 static constexpr uint32_t FAILSAFE_ABS_TIMEOUT_MS = 1000U;
-// Simulated RC channel values for WiFi mode debugging (988-2012us)
-static uint16_t simulatedChannels[16] = {};
-static bool simulatedChannelsDirty = false;
 
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
 static bool flightControlMotorOutputEnabled()
@@ -36,11 +33,6 @@ static bool flightControlMotorOutputEnabled()
         return true;
     }
 
-    if (connectionState == wifiUpdate && simulatedChannels[4] != 0)
-    {
-        return simulatedChannels[4] >= 1500;
-    }
-
     return CRSF_to_BIT(ChannelData[4]);
 }
 #endif
@@ -48,20 +40,6 @@ static bool flightControlMotorOutputEnabled()
 void ICACHE_RAM_ATTR servoNewChannelsAvailable()
 {
     newChannelsAvailable = true;
-}
-
-void servoSetSimulatedChannel(uint8_t ch, uint16_t us)
-{
-    if (ch < 16)
-    {
-        simulatedChannels[ch] = constrain(us, 988, 2012);
-        simulatedChannelsDirty = true;
-    }
-}
-
-uint16_t servoGetSimulatedChannel(uint8_t ch)
-{
-    return ch < 16 ? simulatedChannels[ch] : 0;
 }
 
 uint16_t servoOutputModeToFrequency(eServoOutputMode mode)
@@ -163,10 +141,9 @@ static void servosFailsafe()
 static void servosUpdate(unsigned long now)
 {
     static uint32_t lastUpdate;
-    if (newChannelsAvailable || simulatedChannelsDirty)
+    if (newChannelsAvailable)
     {
         newChannelsAvailable = false;
-        simulatedChannelsDirty = false;
         lastUpdate = now;
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
         const FlightControlMixerOutput &mixerOutput = flightControlGetMixerOutput();
@@ -199,22 +176,15 @@ static void servosUpdate(unsigned long now)
                 continue;
             }
 #endif
-            // Passthrough mode: use RC channel data (or WiFi simulated channels)
+            // Passthrough mode: use RC channel data
             const uint8_t inputCh = chConfig->val.inputChannel;
             uint16_t us;
-            if (connectionState == wifiUpdate && simulatedChannels[inputCh] != 0)
+            const unsigned crsfVal = ChannelData[inputCh];
+            if (crsfVal == 0)
             {
-                us = simulatedChannels[inputCh];
+                continue;
             }
-            else
-            {
-                const unsigned crsfVal = ChannelData[inputCh];
-                if (crsfVal == 0)
-                {
-                    continue;
-                }
-                us = CRSF_to_US(crsfVal);
-            }
+            us = CRSF_to_US(crsfVal);
             if (chConfig->val.inverted)
             {
                 us = 3000U - us;

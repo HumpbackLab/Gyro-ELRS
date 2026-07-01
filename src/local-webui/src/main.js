@@ -15,7 +15,6 @@ const state = {
   originalUid: [],
   originalUidType: '',
   networks: [],
-  simChannels: Array(16).fill(1500),
   message: null,
   busy: false,
   uploadResult: null,
@@ -569,11 +568,6 @@ async function loadDevice() {
   state.configResponse = configResponse;
   state.hardware = hardwareResponse;
   state.runtimeStatus = runtimeStatus;
-  // Load simulated channels for WiFi mode
-  apiFetch('/channels').then((r) => {
-    if (r?.channels) state.simChannels = r.channels;
-    render();
-  }).catch(() => {});
   state.extraMixerRows = 0;
   state.originalUid = bytesToList(configResponse?.config?.uid);
   state.originalUidType = configResponse?.config?.uidtype || '';
@@ -1079,19 +1073,6 @@ function renderPwm() {
         </div>
         <div class="actions"><button class="primary" ${state.busy ? 'disabled' : ''}>Save</button><button class="secondary" type="button" data-action="refresh">Refresh</button></div>
       </form>
-      <details class="channel-sim-details">
-        <summary>RC Channel Simulator</summary>
-        <div class="helper" style="margin-top:8px">Drag sliders to simulate RC values (988–2012µs) for PWM passthrough in WiFi mode.</div>
-        <div id="channel-sliders" class="channel-grid" style="margin-top:8px">
-          ${[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15].map(i => `
-            <div class="ch-cell">
-              <span class="ch-label">CH${i+1}</span>
-              <input type="range" min="988" max="2012" value="${state.simChannels[i] || 1500}" data-ch-slider="${i}">
-              <span class="ch-value">${state.simChannels[i] || 1500}</span>
-            </div>
-          `).join('')}
-        </div>
-      </details>
     </section>`;
 }
 
@@ -1371,29 +1352,6 @@ function wireOrientationPreview() {
   });
 }
 
-function wireChannelSliders() {
-  const container = document.querySelector('#channel-sliders');
-  if (!container) return;
-  let updateTimer = null;
-  const sendChannels = () => {
-    const channels = state.simChannels.map(v => v || 1500);
-    apiFetch('/channels', {method: 'POST', body: JSON.stringify({channels})}).catch(() => {});
-  };
-  container.querySelectorAll('input[data-ch-slider]').forEach(slider => {
-    slider.addEventListener('input', () => {
-      const i = parseInt(slider.dataset.chSlider);
-      const val = parseInt(slider.value);
-      state.simChannels[i] = val;
-      const cell = slider.closest('.ch-cell');
-      if (cell) {
-        cell.querySelector('.ch-value').textContent = val;
-      }
-      clearTimeout(updateTimer);
-      updateTimer = setTimeout(sendChannels, 100); // debounce
-    });
-  });
-}
-
 function wirePwmForm() {
   const form = document.querySelector('#pwm-form');
   if (!form) return;
@@ -1569,7 +1527,6 @@ function wireEvents() {
   syncBindingPreview();
   wireOrientationPreview();
   wirePwmForm();
-  wireChannelSliders();
 
   document.querySelectorAll('[data-action]').forEach((button) => {
     button.addEventListener('click', () => {
