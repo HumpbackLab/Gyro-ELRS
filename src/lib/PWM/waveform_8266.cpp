@@ -51,8 +51,6 @@
 
 #include <Arduino.h>
 #include "ets_sys.h"
-#include "user_interface.h"
-#include "waveform_8266.h"
 
 // Waveform generator can create tones, PWM, and servos
 typedef struct {
@@ -81,116 +79,6 @@ public:
   bool timerRunning = false;
 };
 static WVFState wvfState;
-
-static volatile uint32_t pwmIsrCalls;
-static volatile uint32_t pwmIsrTotalCycles;
-static volatile uint32_t pwmIsrMaxCycles;
-static volatile uint32_t pwmIsrMaxDoWhileLoops;
-
-enum : uint32_t {
-  PWM_BREADCRUMB_IDLE = 0,
-  PWM_BREADCRUMB_START_REQUESTED = 1,
-  PWM_BREADCRUMB_TIMER_INITIALIZED = 2,
-  PWM_BREADCRUMB_INTERRUPT_FORCED = 3,
-  PWM_BREADCRUMB_WAITING_FOR_ENABLE = 4,
-  PWM_BREADCRUMB_ACTIVE = 5,
-  PWM_BREADCRUMB_STOP_REQUESTED = 6,
-};
-
-struct PWMBreadcrumbRtc {
-  uint32_t magic;
-  uint32_t version;
-  uint32_t bootCount;
-  uint32_t suspiciousResetCount;
-  uint32_t resetReasonCode;
-  uint32_t activeStage;
-  uint32_t activeGpio;
-  uint32_t activeHighUs;
-  uint32_t activeLowUs;
-  uint32_t lastResetStage;
-  uint32_t lastResetGpio;
-  uint32_t lastResetHighUs;
-  uint32_t lastResetLowUs;
-};
-
-static constexpr uint32_t PWM_BREADCRUMB_MAGIC = 0x50574D42; // PWMB
-static constexpr uint32_t PWM_BREADCRUMB_VERSION = 1;
-static constexpr uint32_t PWM_BREADCRUMB_RTC_OFFSET = 40; // skip eboot RTC area
-static PWMBreadcrumbRtc pwmBreadcrumbRtc = {};
-
-static void savePwmBreadcrumbs()
-{
-  ESP.rtcUserMemoryWrite(PWM_BREADCRUMB_RTC_OFFSET, reinterpret_cast<uint32_t *>(&pwmBreadcrumbRtc), sizeof(pwmBreadcrumbRtc));
-}
-
-static void updatePwmBreadcrumbStage(uint32_t stage, uint32_t gpio, uint32_t highUs, uint32_t lowUs)
-{
-  pwmBreadcrumbRtc.activeStage = stage;
-  pwmBreadcrumbRtc.activeGpio = gpio;
-  pwmBreadcrumbRtc.activeHighUs = highUs;
-  pwmBreadcrumbRtc.activeLowUs = lowUs;
-  savePwmBreadcrumbs();
-}
-
-void initPwmCrashBreadcrumbs()
-{
-  PWMBreadcrumbRtc rtc = {};
-  const bool ok = ESP.rtcUserMemoryRead(PWM_BREADCRUMB_RTC_OFFSET, reinterpret_cast<uint32_t *>(&rtc), sizeof(rtc));
-  if (!ok || rtc.magic != PWM_BREADCRUMB_MAGIC || rtc.version != PWM_BREADCRUMB_VERSION)
-  {
-    rtc = {};
-    rtc.magic = PWM_BREADCRUMB_MAGIC;
-    rtc.version = PWM_BREADCRUMB_VERSION;
-  }
-
-  rtc.bootCount++;
-  rtc.resetReasonCode = ESP.getResetInfoPtr()->reason;
-  if (rtc.activeStage != PWM_BREADCRUMB_IDLE)
-  {
-    rtc.suspiciousResetCount++;
-    rtc.lastResetStage = rtc.activeStage;
-    rtc.lastResetGpio = rtc.activeGpio;
-    rtc.lastResetHighUs = rtc.activeHighUs;
-    rtc.lastResetLowUs = rtc.activeLowUs;
-  }
-  rtc.activeStage = PWM_BREADCRUMB_IDLE;
-  rtc.activeGpio = 0;
-  rtc.activeHighUs = 0;
-  rtc.activeLowUs = 0;
-  pwmBreadcrumbRtc = rtc;
-  savePwmBreadcrumbs();
-}
-
-const char *getPwmBreadcrumbStageName(uint32_t stage)
-{
-  switch (stage) {
-    case PWM_BREADCRUMB_IDLE: return "idle";
-    case PWM_BREADCRUMB_START_REQUESTED: return "start_requested";
-    case PWM_BREADCRUMB_TIMER_INITIALIZED: return "timer_initialized";
-    case PWM_BREADCRUMB_INTERRUPT_FORCED: return "interrupt_forced";
-    case PWM_BREADCRUMB_WAITING_FOR_ENABLE: return "waiting_for_enable";
-    case PWM_BREADCRUMB_ACTIVE: return "active";
-    case PWM_BREADCRUMB_STOP_REQUESTED: return "stop_requested";
-    default: return "unknown";
-  }
-}
-
-pwm_breadcrumbs_t getPwmCrashBreadcrumbs()
-{
-  pwm_breadcrumbs_t breadcrumbs = {};
-  breadcrumbs.bootCount = pwmBreadcrumbRtc.bootCount;
-  breadcrumbs.suspiciousResetCount = pwmBreadcrumbRtc.suspiciousResetCount;
-  breadcrumbs.resetReasonCode = pwmBreadcrumbRtc.resetReasonCode;
-  breadcrumbs.activeStage = pwmBreadcrumbRtc.activeStage;
-  breadcrumbs.activeGpio = pwmBreadcrumbRtc.activeGpio;
-  breadcrumbs.activeHighUs = pwmBreadcrumbRtc.activeHighUs;
-  breadcrumbs.activeLowUs = pwmBreadcrumbRtc.activeLowUs;
-  breadcrumbs.lastResetStage = pwmBreadcrumbRtc.lastResetStage;
-  breadcrumbs.lastResetGpio = pwmBreadcrumbRtc.lastResetGpio;
-  breadcrumbs.lastResetHighUs = pwmBreadcrumbRtc.lastResetHighUs;
-  breadcrumbs.lastResetLowUs = pwmBreadcrumbRtc.lastResetLowUs;
-  return breadcrumbs;
-}
 
 // Ensure everything is read/written to RAM
 #define MEMBARRIER() { __asm__ volatile("" ::: "memory"); }
@@ -242,12 +130,10 @@ void startWaveform8266(uint8_t gpio, uint32_t timeHighUS, uint32_t timeLowUS) {
   Waveform *wave = &wvfState.waveform[gpio];
 
   uint32_t mask = 1<<gpio;
-  updatePwmBreadcrumbStage(PWM_BREADCRUMB_START_REQUESTED, gpio, timeHighUS, timeLowUS);
   MEMBARRIER();
   if (wvfState.waveformEnabled & mask) {
     wave->nextHighLowUs = (timeHighUS << 16) | timeLowUS;
     MEMBARRIER();
-    updatePwmBreadcrumbStage(PWM_BREADCRUMB_ACTIVE, gpio, timeHighUS, timeLowUS);
     // The waveform will be updated some time in the future on the next period for the signal
   } else { //  if (!(wvfState.waveformEnabled & mask)) {
     wave->timeHighCycles = microsecondsToClockCycles(timeHighUS);
@@ -257,24 +143,18 @@ void startWaveform8266(uint8_t gpio, uint32_t timeHighUS, uint32_t timeLowUS) {
     wvfState.waveformToEnable |= mask;
     MEMBARRIER();
     initTimer();
-    updatePwmBreadcrumbStage(PWM_BREADCRUMB_TIMER_INITIALIZED, gpio, timeHighUS, timeLowUS);
     forceTimerInterrupt();
-    updatePwmBreadcrumbStage(PWM_BREADCRUMB_INTERRUPT_FORCED, gpio, timeHighUS, timeLowUS);
-    updatePwmBreadcrumbStage(PWM_BREADCRUMB_WAITING_FOR_ENABLE, gpio, timeHighUS, timeLowUS);
     while (wvfState.waveformToEnable) {
       delay(0); // Wait for waveform to update
       // No mem barrier here, the call to a global function implies global state updated
     }
-    updatePwmBreadcrumbStage(PWM_BREADCRUMB_ACTIVE, gpio, timeHighUS, timeLowUS);
   }
 }
 
 // Stops a waveform on a pin
 void stopWaveform8266(uint8_t gpio) {
-  updatePwmBreadcrumbStage(PWM_BREADCRUMB_STOP_REQUESTED, gpio, 0, 0);
   // Can't possibly need to stop anything if there is no timer active
   if (!wvfState.timerRunning) {
-    updatePwmBreadcrumbStage(PWM_BREADCRUMB_IDLE, gpio, 0, 0);
     return;
   }
   // If user sends in a pin >16 but <32, this will always point to a 0 bit
@@ -289,7 +169,6 @@ void stopWaveform8266(uint8_t gpio) {
     }
   }
   disableIdleTimer();
-  updatePwmBreadcrumbStage(PWM_BREADCRUMB_IDLE, gpio, 0, 0);
 }
 
 // Speed critical bits
@@ -312,51 +191,6 @@ static inline IRAM_ATTR uint32_t earliest(uint32_t a, uint32_t b) {
     return (da < db) ? a : b;
 }
 
-pwm_isr_profile_t getPwmIsrProfile()
-{
-  static uint32_t lastMillis = 0;
-  static uint32_t lastCalls = 0;
-  static uint32_t lastTotalCycles = 0;
-
-  const uint32_t nowMs = millis();
-  const uint32_t calls = pwmIsrCalls;
-  const uint32_t totalCycles = pwmIsrTotalCycles;
-  const uint32_t maxCycles = pwmIsrMaxCycles;
-  const uint32_t maxDoWhileLoops = pwmIsrMaxDoWhileLoops;
-
-  pwm_isr_profile_t profile = {};
-  if (lastMillis == 0)
-  {
-    lastMillis = nowMs;
-    lastCalls = calls;
-    lastTotalCycles = totalCycles;
-    return profile;
-  }
-
-  const uint32_t windowMs = nowMs - lastMillis;
-  const uint32_t deltaCalls = calls - lastCalls;
-  const uint32_t deltaCycles = totalCycles - lastTotalCycles;
-  profile.sampleWindowMs = windowMs;
-  profile.isrCalls = deltaCalls;
-  if (windowMs != 0)
-  {
-    profile.isrRate = (uint32_t)(((uint64_t)deltaCalls * 1000ULL) / windowMs);
-  }
-  if (deltaCalls != 0)
-  {
-    profile.avgIsrUs = clockCyclesToMicroseconds(deltaCycles / deltaCalls);
-  }
-  profile.maxIsrUs = clockCyclesToMicroseconds(maxCycles);
-  profile.maxDoWhileLoops = maxDoWhileLoops;
-
-  lastMillis = nowMs;
-  lastCalls = calls;
-  lastTotalCycles = totalCycles;
-  pwmIsrMaxCycles = 0;
-  pwmIsrMaxDoWhileLoops = 0;
-  return profile;
-}
-
 #if F_CPU == 80000000
 #define adjust(x) ((x) << (turbo ? 1 : 0))
 #else
@@ -364,7 +198,6 @@ pwm_isr_profile_t getPwmIsrProfile()
 #endif
 
 static IRAM_ATTR void timer1Interrupt() {
-  const uint32_t isrStartCs = GetCycleCountIRQ();
   // Maximum delay between IRQs. 25ms to guarantee no extra interrupts at 50Hz output (20ms)
   constexpr uint32_t MAXINTERVAL_CS = microsecondsToClockCycles(25000);
   // Keep running until the next event is at least this far in the future
@@ -403,9 +236,7 @@ static IRAM_ATTR void timer1Interrupt() {
     // Time the loop and use it to allow an edge to happen early if another round of loops would cause it to be late
     // For 160M clock and 10 pins checked with 1 flipping, this code takes ~250 clock cyles to run so start with an estimate
     int32_t lastLoopCs = (wvfState.endPin - wvfState.startPin) * (40 >> (turbo ? 1 : 0));
-    uint32_t doWhileLoops = 0;
     do {
-      doWhileLoops++;
       uint32_t loopStartCs = GetCycleCountIRQ();
       uint32_t nextEventCycle = loopStartCs + MAXINTERVAL_CS;
 
@@ -457,21 +288,12 @@ static IRAM_ATTR void timer1Interrupt() {
       // Save the duration of the loop for the next early timeout
       lastLoopCs = loopEndCs - loopStartCs;
     } while (cycleDeltaNextEvent < DELTAIRQ_CS);
-    if (doWhileLoops > pwmIsrMaxDoWhileLoops) {
-      pwmIsrMaxDoWhileLoops = doWhileLoops;
-    }
   } // if (wvfState.waveformEnabled)
 
   // cycleDeltaNextEvent should be pretty close to or above DELTAIRQ_CS
   // schedule the timer a little early to allow time to get to the pin switch code before the deadline
   T1L = (cycleDeltaNextEvent - PRESCHEDULE_CS) >> (turbo ? 1 : 0);
   T1C = (1 << TCTE); //timer1_enable(TIM_DIV1, TIM_EDGE, TIM_SINGLE)
-  const uint32_t isrCycles = GetCycleCountIRQ() - isrStartCs;
-  pwmIsrCalls++;
-  pwmIsrTotalCycles += isrCycles;
-  if (isrCycles > pwmIsrMaxCycles) {
-    pwmIsrMaxCycles = isrCycles;
-  }
 }
 
 #endif

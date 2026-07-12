@@ -56,9 +56,6 @@
 #if defined(HAS_BASIC_FLIGHT_CONTROL)
 #include "FlightControlConfig.h"
 #endif
-#if defined(PLATFORM_ESP8266)
-#include "waveform_8266.h"
-#endif
 
 #if !defined(LOCAL_WEBUI)
 #include "WebContent.h"
@@ -542,42 +539,8 @@ static void GetConfiguration(AsyncWebServerRequest *request)
 
 static void GetRuntimeStatus(AsyncWebServerRequest *request)
 {
-  const main_loop_profile_t profile = getMainLoopProfile();
   AsyncJsonResponse *response = new AsyncJsonResponse();
   JsonObject json = response->getRoot();
-  JsonObject mainLoop = json["main-loop"].to<JsonObject>();
-  mainLoop["sample-window-ms"] = profile.sampleWindowMs;
-  mainLoop["loop-count"] = profile.loopCount;
-  mainLoop["loop-hz"] = profile.loopHz;
-  mainLoop["avg-period-us"] = profile.avgLoopPeriodUs;
-  mainLoop["max-period-us"] = profile.maxLoopPeriodUs;
-  mainLoop["avg-work-us"] = profile.avgLoopWorkUs;
-  mainLoop["max-work-us"] = profile.maxLoopWorkUs;
-#if defined(PLATFORM_ESP8266)
-  const pwm_isr_profile_t pwmProfile = getPwmIsrProfile();
-  JsonObject pwmIsr = json["pwm-isr"].to<JsonObject>();
-  pwmIsr["sample-window-ms"] = pwmProfile.sampleWindowMs;
-  pwmIsr["calls"] = pwmProfile.isrCalls;
-  pwmIsr["rate-hz"] = pwmProfile.isrRate;
-  pwmIsr["avg-us"] = pwmProfile.avgIsrUs;
-  pwmIsr["max-us"] = pwmProfile.maxIsrUs;
-  pwmIsr["max-loops"] = pwmProfile.maxDoWhileLoops;
-
-  const pwm_breadcrumbs_t breadcrumbs = getPwmCrashBreadcrumbs();
-  JsonObject pwmCrash = json["pwm-crash"].to<JsonObject>();
-  pwmCrash["boot-count"] = breadcrumbs.bootCount;
-  pwmCrash["suspicious-reset-count"] = breadcrumbs.suspiciousResetCount;
-  pwmCrash["reset-reason-code"] = breadcrumbs.resetReasonCode;
-  pwmCrash["reset-reason"] = ESP.getResetReason();
-  pwmCrash["active-stage"] = getPwmBreadcrumbStageName(breadcrumbs.activeStage);
-  pwmCrash["active-gpio"] = breadcrumbs.activeGpio;
-  pwmCrash["active-high-us"] = breadcrumbs.activeHighUs;
-  pwmCrash["active-low-us"] = breadcrumbs.activeLowUs;
-  pwmCrash["last-reset-stage"] = getPwmBreadcrumbStageName(breadcrumbs.lastResetStage);
-  pwmCrash["last-reset-gpio"] = breadcrumbs.lastResetGpio;
-  pwmCrash["last-reset-high-us"] = breadcrumbs.lastResetHighUs;
-  pwmCrash["last-reset-low-us"] = breadcrumbs.lastResetLowUs;
-#endif
 #if defined(HAS_GYRO)
   JsonObject imu = json["imu"].to<JsonObject>();
   imu["gyro-ready"] = GyroIsInitialized();

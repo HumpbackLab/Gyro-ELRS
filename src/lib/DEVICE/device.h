@@ -45,16 +45,6 @@ typedef struct {
   int8_t core; // 0 = alternate core or 1 = loop core
 } device_affinity_t;
 
-typedef struct {
-    uint32_t sampleWindowMs;
-    uint32_t loopCount;
-    uint32_t loopHz;
-    uint32_t avgLoopPeriodUs;
-    uint32_t maxLoopPeriodUs;
-    uint32_t avgLoopWorkUs;
-    uint32_t maxLoopWorkUs;
-} main_loop_profile_t;
-
 /**
  * @brief register a list of devices to be actioned
  *
@@ -93,8 +83,3 @@ void devicesTriggerEvent();
  * This destroys the FreeRTOS task runnin on the alternate core(s).
  */
 void devicesStop();
-
-/**
- * @brief Return the latest 1-second rolling profile of the main Arduino loop.
- */
-main_loop_profile_t getMainLoopProfile();

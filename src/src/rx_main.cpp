@@ -41,9 +41,6 @@
 #include "devBaro.h"
 #include "devMSPVTX.h"
 #include "devThermal.h"
-#if defined(PLATFORM_ESP8266)
-#include "waveform_8266.h"
-#endif
 
 #if defined(PLATFORM_ESP8266)
 #include <user_interface.h>
@@ -144,14 +141,6 @@ extern bool webserverPreventAutoStart;
 bool pwmSerialDefined = false;
 #endif
 uint32_t serialBaud;
-
-static main_loop_profile_t mainLoopProfile = {};
-static uint32_t mainLoopWindowStartUs;
-static uint32_t mainLoopLastStartUs;
-static uint32_t mainLoopIterations;
-static uint32_t mainLoopMaxPeriodUs;
-static uint32_t mainLoopMaxWorkUs;
-static uint64_t mainLoopTotalWorkUs;
 
 /* SERIAL_PROTOCOL_TX is used by CRSF output */
 #if defined(TARGET_RX_FM30_MINI)
@@ -269,70 +258,6 @@ bool BindingModeRequest = false;
 static uint32_t BindingRateChangeTime;
 #endif
 #define BindingRateChangeCyclePeriod 125
-
-static inline uint32_t elapsedUs(uint32_t startUs, uint32_t endUs)
-{
-    return endUs - startUs;
-}
-
-static void profileMainLoopStart(uint32_t loopStartUs)
-{
-    if (mainLoopWindowStartUs == 0)
-    {
-        mainLoopWindowStartUs = loopStartUs;
-        mainLoopLastStartUs = loopStartUs;
-        return;
-    }
-
-    const uint32_t periodUs = elapsedUs(mainLoopLastStartUs, loopStartUs);
-    mainLoopLastStartUs = loopStartUs;
-    if (periodUs > mainLoopMaxPeriodUs)
-    {
-        mainLoopMaxPeriodUs = periodUs;
-    }
-}
-
-static void profileMainLoopEnd(uint32_t loopStartUs, uint32_t loopEndUs)
-{
-    const uint32_t workUs = elapsedUs(loopStartUs, loopEndUs);
-    mainLoopIterations++;
-    mainLoopTotalWorkUs += workUs;
-    if (workUs > mainLoopMaxWorkUs)
-    {
-        mainLoopMaxWorkUs = workUs;
-    }
-
-    const uint32_t windowUs = elapsedUs(mainLoopWindowStartUs, loopEndUs);
-    if (windowUs < 1000000U)
-    {
-        return;
-    }
-
-    main_loop_profile_t snapshot = {};
-    snapshot.sampleWindowMs = windowUs / 1000U;
-    snapshot.loopCount = mainLoopIterations;
-    if (mainLoopIterations != 0)
-    {
-        snapshot.loopHz = (uint32_t)(((uint64_t)mainLoopIterations * 1000000ULL) / windowUs);
-        snapshot.avgLoopPeriodUs = windowUs / mainLoopIterations;
-        snapshot.avgLoopWorkUs = (uint32_t)(mainLoopTotalWorkUs / mainLoopIterations);
-    }
-    snapshot.maxLoopPeriodUs = mainLoopMaxPeriodUs;
-    snapshot.maxLoopWorkUs = mainLoopMaxWorkUs;
-
-    mainLoopProfile = snapshot;
-
-    mainLoopWindowStartUs = loopEndUs;
-    mainLoopIterations = 0;
-    mainLoopMaxPeriodUs = 0;
-    mainLoopMaxWorkUs = 0;
-    mainLoopTotalWorkUs = 0;
-}
-
-main_loop_profile_t getMainLoopProfile()
-{
-    return mainLoopProfile;
-}
 
 extern void setWifiUpdateMode();
 void reconfigureSerial();
@@ -2151,9 +2076,6 @@ void resetConfigAndReboot()
 
 void setup()
 {
-#if defined(PLATFORM_ESP8266)
-    initPwmCrashBreadcrumbs();
-#endif
     #if defined(TARGET_UNIFIED_RX)
     hardwareConfigured = options_init();
     if (!hardwareConfigured)
@@ -2256,8 +2178,6 @@ void main_loop()
 void loop()
 #endif
 {
-    const uint32_t loopStartUs = micros();
-    profileMainLoopStart(loopStartUs);
     unsigned long now = millis();
 
     if (MspReceiver.HasFinishedData())
@@ -2280,8 +2200,11 @@ void loop()
     CheckConfigChangePending();
     executeDeferredFunction(micros());
 
-    if (connectionState <= MODE_STATES)
+    if (connectionState > MODE_STATES)
     {
+        return;
+    }
+
         if ((connectionState != disconnected) && (ExpressLRS_currAirRate_Modparams->index != ExpressLRS_nextAirRateIndex)) // forced change
         {
             DBGLN("Req air rate change %u->%u", ExpressLRS_currAirRate_Modparams->index, ExpressLRS_nextAirRateIndex);
@@ -2346,8 +2269,6 @@ void loop()
         DynamicPower_UpdateRx(false);
         debugRcvrLinkstats();
         debugRcvrSignalStats(now);
-    }
-    profileMainLoopEnd(loopStartUs, micros());
 }
 
 #if defined(PLATFORM_ESP32_C3)
