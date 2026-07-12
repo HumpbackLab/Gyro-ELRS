@@ -3,6 +3,7 @@
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
 
 #include "FlightControl.h"
+#include "FlightControlConfig.h"
 #include "common.h"
 #include "crsf_protocol.h"
 #include <Arduino.h>
@@ -27,6 +28,7 @@ bool flightControlGetDebugSnapshot(FlightControlDebugSnapshot &snapshot)
 
 static void initialize()
 {
+    flightControlConfig.Load();
     runtime.begin();
 }
 

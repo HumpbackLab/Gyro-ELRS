@@ -3,9 +3,9 @@
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
 
 #include "common.h"
-#include "config.h"
 #include "crsf_protocol.h"
 #include "devGyro.h"
+#include "FlightControlConfig.h"
 #include "helpers.h"
 #include <Arduino.h>
 #include <math.h>
@@ -18,7 +18,7 @@ static constexpr uint16_t FC_COMPLEMENTARY_ALPHA_PERMILLE = (uint16_t)(FC_COMPLE
 static constexpr float FC_STANDARD_GRAVITY = 9.80665f;
 static constexpr uint8_t FC_PID_COLUMNS = 4;
 static constexpr uint8_t FC_PID_AXES = 3;
-// RX config stores PID values in centi-units for LUA/CRSF int16 transport;
+// fc.json stores PID values in centi-units for LUA/CRSF int16 transport;
 // restore them to the same floating-point units shown in the WebUI.
 static constexpr float FC_PID_CONFIG_SCALE = 0.01f;
 // Mixer coefficients produce an arbitrary summed control value. Convert that
@@ -153,8 +153,8 @@ float FlightControlPid::update(float target, float measurement, float dt)
 
 bool FlightControlMixer::begin()
 {
-    const int count = config.GetFlightControlMixerCount();
-    _mix = config.GetFlightControlMixer();
+    const int count = flightControlConfig.GetMixerCount();
+    _mix = flightControlConfig.GetMixer();
     if (!_mix || count <= 0 || count % FC_MIXER_COLUMNS != 0)
     {
         _motorCount = 0;
@@ -186,7 +186,7 @@ FlightControlMixerOutput FlightControlMixer::mix(float throttle, float roll, flo
 
 bool FlightControlOrientation::begin()
 {
-    const float *orientation = config.GetFlightControlOrientation();
+    const float *orientation = flightControlConfig.GetOrientation();
     if (!orientation)
     {
         return true;
@@ -262,15 +262,15 @@ bool FlightControlRuntime::refreshReadyState()
 
 bool FlightControlRuntime::loadPidParameters()
 {
-    const bool rateReady = loadPidBank(_rollRatePid, _pitchRatePid, _yawRatePid, config.GetFlightControlRatePid(), FC_PID_TERM_COUNT);
-    _angleEnabled = config.GetFlightControlAngleMode();
+    const bool rateReady = loadPidBank(_rollRatePid, _pitchRatePid, _yawRatePid, flightControlConfig.GetRatePid(), FC_PID_TERM_COUNT);
+    _angleEnabled = flightControlConfig.GetAngleMode();
 
     if (!_angleEnabled)
     {
         return rateReady;
     }
 
-    const bool angleReady = loadPidBank(_rollAnglePid, _pitchAnglePid, _yawAnglePid, config.GetFlightControlAnglePid(), FC_PID_TERM_COUNT);
+    const bool angleReady = loadPidBank(_rollAnglePid, _pitchAnglePid, _yawAnglePid, flightControlConfig.GetAnglePid(), FC_PID_TERM_COUNT);
     return rateReady && angleReady;
 }
 
@@ -369,7 +369,7 @@ void FlightControlRuntime::update(uint32_t nowUs)
     _lastSampleAgeMs = sample.timestampMs == 0 ? 0 : (uint16_t)constrain((uint32_t)(_lastDebugUpdateMs - sample.timestampMs), 0U, 65535U);
     _estimator.update(sample, dt);
 
-    if (config.GetFlightControlArmMode() && !CRSF_to_BIT(ChannelData[4]))
+    if (flightControlConfig.GetArmMode() && !CRSF_to_BIT(ChannelData[4]))
     {
         resetPidState();
         return;

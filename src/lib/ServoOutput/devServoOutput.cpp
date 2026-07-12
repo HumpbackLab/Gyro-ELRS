@@ -8,6 +8,7 @@
 #include "rxtx_intf.h"
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
 #include "devFlightControl.h"
+#include "FlightControlConfig.h"
 #endif
 
 static int8_t servoPins[PWM_MAX_CHANNELS];
@@ -28,7 +29,7 @@ static constexpr uint32_t FAILSAFE_ABS_TIMEOUT_MS = 1000U;
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
 static bool flightControlMotorOutputEnabled()
 {
-    if (!config.GetFlightControlArmMode())
+    if (!flightControlConfig.GetArmMode())
     {
         return true;
     }

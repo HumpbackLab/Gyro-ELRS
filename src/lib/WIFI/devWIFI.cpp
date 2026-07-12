@@ -53,6 +53,9 @@
 #include "devGyro.h"
 #include "devAnalogVbat.h"
 #include "devServoOutput.h"
+#if defined(HAS_BASIC_FLIGHT_CONTROL)
+#include "FlightControlConfig.h"
+#endif
 #if defined(PLATFORM_ESP8266)
 #include "waveform_8266.h"
 #endif
@@ -285,6 +288,11 @@ static void HandleReset(AsyncWebServerRequest *request)
   if (request->hasArg("model") || request->hasArg("config")) {
     config.SetDefaults(true);
   }
+  #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+  if (request->hasArg("config")) {
+    SPIFFS.remove("/fc.json");
+  }
+  #endif
   AsyncWebServerResponse *response = request->beginResponse(200, "application/json", "Reset complete, rebooting...");
   response->addHeader("Connection", "close");
   request->send(response);
@@ -326,7 +334,7 @@ static const char *GetConfigUidType(const JsonObject json)
 #endif
 }
 
-#if defined(TARGET_RX)
+#if defined(TARGET_RX) && defined(HAS_BASIC_FLIGHT_CONTROL)
 static void FlightControlPidToJson(JsonObject &json, const char *key, const int16_t *pid)
 {
   JsonArray array = json[key].to<JsonArray>();
@@ -383,7 +391,7 @@ static void JsonFlightControlMixerToConfig(JsonVariant &json)
   {
     mixer[i] = array[i].as<float>();
   }
-  config.SetFlightControlMixer(mixer, count);
+  flightControlConfig.SetMixer(mixer, count);
 }
 
 static void JsonFlightControlOrientationToConfig(JsonVariant &json)
@@ -404,7 +412,7 @@ static void JsonFlightControlOrientationToConfig(JsonVariant &json)
   {
     orientation[i] = array[i].as<float>();
   }
-  config.SetFlightControlOrientation(orientation, FC_ORIENTATION_VALUE_COUNT);
+  flightControlConfig.SetOrientation(orientation, FC_ORIENTATION_VALUE_COUNT);
 }
 #endif
 
@@ -488,14 +496,16 @@ static void GetConfiguration(AsyncWebServerRequest *request)
     json["config"]["modelid"] = config.GetModelId();
     json["config"]["force-tlm"] = config.GetForceTlmOff();
     json["config"]["vbind"] = config.GetBindStorage();
-    json["config"]["fc_angle_enabled"] = config.GetFlightControlAngleMode();
-    json["config"]["fc_arm_enabled"] = config.GetFlightControlArmMode();
+    #if defined(HAS_BASIC_FLIGHT_CONTROL)
+    json["config"]["fc_angle_enabled"] = flightControlConfig.GetAngleMode();
+    json["config"]["fc_arm_enabled"] = flightControlConfig.GetArmMode();
     JsonObject configJson = json["config"];
-    FlightControlPidToJson(configJson, "fc_rate_pid", config.GetFlightControlRatePid());
-    FlightControlPidToJson(configJson, "fc_angle_pid", config.GetFlightControlAnglePid());
-    FlightControlFloatArrayToJson(configJson, "fc_mixer", config.GetFlightControlMixer(), config.GetFlightControlMixerCount());
-    configJson["fc_mixer_count"] = config.GetFlightControlMixerCount();
-    FlightControlFloatArrayToJson(configJson, "fc_orientation", config.GetFlightControlOrientation(), FC_ORIENTATION_VALUE_COUNT);
+    FlightControlPidToJson(configJson, "fc_rate_pid", flightControlConfig.GetRatePid());
+    FlightControlPidToJson(configJson, "fc_angle_pid", flightControlConfig.GetAnglePid());
+    FlightControlFloatArrayToJson(configJson, "fc_mixer", flightControlConfig.GetMixer(), flightControlConfig.GetMixerCount());
+    configJson["fc_mixer_count"] = flightControlConfig.GetMixerCount();
+    FlightControlFloatArrayToJson(configJson, "fc_orientation", flightControlConfig.GetOrientation(), FC_ORIENTATION_VALUE_COUNT);
+    #endif
     #if defined(GPIO_PIN_PWM_OUTPUTS)
     for (int ch=0; ch<GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
     {
@@ -734,23 +744,25 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
   }
   #endif
 
+  #if defined(HAS_BASIC_FLIGHT_CONTROL)
   JsonPidToConfig(json, "fc_rate_pid", [](uint8_t index, int16_t value) {
-    config.SetFlightControlRatePid(index, value);
+    flightControlConfig.SetRatePid(index, value);
   });
   JsonPidToConfig(json, "fc_angle_pid", [](uint8_t index, int16_t value) {
-    config.SetFlightControlAnglePid(index, value);
+    flightControlConfig.SetAnglePid(index, value);
   });
   if (json.containsKey("fc_angle_enabled"))
   {
-    config.SetFlightControlAngleMode(json["fc_angle_enabled"] | false);
+    flightControlConfig.SetAngleMode(json["fc_angle_enabled"] | false);
   }
   if (json.containsKey("fc_arm_enabled"))
   {
-    config.SetFlightControlArmMode(json["fc_arm_enabled"] | false);
+    flightControlConfig.SetArmMode(json["fc_arm_enabled"] | false);
   }
-  config.CommitFlightControlChanges();
   JsonFlightControlMixerToConfig(json);
   JsonFlightControlOrientationToConfig(json);
+  flightControlConfig.Commit();
+  #endif
 
   config.Commit();
   request->send(200, "text/plain", "Configuration updated");

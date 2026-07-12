@@ -16,7 +16,7 @@
 #define RX_CONFIG_MAGIC     (0b10U << 30)
 
 #define TX_CONFIG_VERSION   7U
-#define RX_CONFIG_VERSION   11U
+#define RX_CONFIG_VERSION   9U
 
 #if defined(TARGET_TX)
 
@@ -190,11 +190,6 @@ extern TxConfig config;
 
 #if defined(TARGET_RX)
 constexpr uint8_t PWM_MAX_CHANNELS = 16;
-constexpr uint8_t FC_PID_TERM_COUNT = 12;
-constexpr uint8_t FC_MIXER_COLUMNS = 4;
-constexpr uint8_t FC_MIXER_MAX_MOTORS = 8;
-constexpr uint8_t FC_MIXER_VALUE_COUNT = FC_MIXER_COLUMNS * FC_MIXER_MAX_MOTORS;
-constexpr uint8_t FC_ORIENTATION_VALUE_COUNT = 9;
 
 typedef enum : uint8_t {
     BINDSTORAGE_PERSISTENT = 0,
@@ -245,12 +240,6 @@ typedef struct __attribute__((packed)) {
                 teamracePitMode:1;  // FUTURE: Enable pit mode when disabling model
     uint8_t     targetSysId;
     uint8_t     sourceSysId;
-    int16_t     flightControlRatePid[FC_PID_TERM_COUNT];
-    int16_t     flightControlAnglePid[FC_PID_TERM_COUNT];
-    uint8_t     flightControlAngleMode;
-    uint8_t     flightControlMixerCount;
-    float       flightControlMixer[FC_MIXER_VALUE_COUNT];
-    float       flightControlOrientation[FC_ORIENTATION_VALUE_COUNT];
 } rx_config_t;
 
 class RxConfig
@@ -288,14 +277,6 @@ public:
     uint8_t GetTargetSysId()  const { return m_config.targetSysId; }
     uint8_t GetSourceSysId()  const { return m_config.sourceSysId; }
     rx_config_bindstorage_t GetBindStorage() const { return (rx_config_bindstorage_t)m_config.bindStorage; }
-    const int16_t *GetFlightControlRatePid() const { return m_flightControlRatePidPending; }
-    const int16_t *GetFlightControlAnglePid() const { return m_flightControlAnglePidPending; }
-    bool GetFlightControlAngleMode() const { return m_flightControlAngleModePending; }
-    bool GetFlightControlArmMode() const { return m_flightControlArmModePending; }
-    const float *GetFlightControlMixer() const { return m_config.flightControlMixer; }
-    uint8_t GetFlightControlMixerCount() const { return m_config.flightControlMixerCount; }
-    const float *GetFlightControlOrientation() const { return m_config.flightControlOrientation; }
-    bool IsFlightControlModified() const { return m_flightControlModified; }
     bool IsOnLoan() const;
 
     // Setters
@@ -322,13 +303,6 @@ public:
     void SetTargetSysId(uint8_t sysID);
     void SetSourceSysId(uint8_t sysID);
     void SetBindStorage(rx_config_bindstorage_t value);
-    void SetFlightControlRatePid(uint8_t index, int16_t value);
-    void SetFlightControlAnglePid(uint8_t index, int16_t value);
-    void SetFlightControlAngleMode(bool enabled);
-    void SetFlightControlArmMode(bool enabled);
-    void SetFlightControlMixer(const float *values, uint8_t count);
-    void SetFlightControlOrientation(const float *values, uint8_t count);
-    void CommitFlightControlChanges();
     void ReturnLoan();
 
 private:
@@ -338,17 +312,10 @@ private:
     void UpgradeEepromV5();
     void UpgradeEepromV6();
     void UpgradeEepromV7V8();
-    void UpgradeEepromV9();
-    void UpgradeEepromV10();
 
     rx_config_t m_config;
     ELRS_EEPROM *m_eeprom;
     bool        m_modified;
-    int16_t     m_flightControlRatePidPending[FC_PID_TERM_COUNT];
-    int16_t     m_flightControlAnglePidPending[FC_PID_TERM_COUNT];
-    bool        m_flightControlAngleModePending;
-    bool        m_flightControlArmModePending;
-    bool        m_flightControlModified;
 };
 
 extern RxConfig config;

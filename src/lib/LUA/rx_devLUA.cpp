@@ -4,6 +4,9 @@
 #include "helpers.h"
 #include "devServoOutput.h"
 #include "deferred.h"
+#if defined(HAS_BASIC_FLIGHT_CONTROL)
+#include "FlightControlConfig.h"
+#endif
 
 #define RX_HAS_SERIAL1 (GPIO_PIN_SERIAL1_TX != UNDEF_PIN || OPT_HAS_SERVO_OUTPUT)
 
@@ -298,8 +301,8 @@ static void luaparamFlightControlRatePid(struct luaPropertiesCommon *item, uint8
   const int index = findFlightControlPidIndex(item, luaFlightControlRatePid, FC_PID_TERM_COUNT);
   if (index >= 0 && luaGetUpdateValueInt16(&value))
   {
-    config.SetFlightControlRatePid(index, value);
-    config.CommitFlightControlChanges();
+    flightControlConfig.SetRatePid(index, value);
+    flightControlConfig.Commit();
   }
 }
 
@@ -310,8 +313,8 @@ static void luaparamFlightControlAnglePid(struct luaPropertiesCommon *item, uint
   const int index = findFlightControlPidIndex(item, luaFlightControlAnglePid, FC_PID_TERM_COUNT);
   if (index >= 0 && luaGetUpdateValueInt16(&value))
   {
-    config.SetFlightControlAnglePid(index, value);
-    config.CommitFlightControlChanges();
+    flightControlConfig.SetAnglePid(index, value);
+    flightControlConfig.Commit();
   }
 }
 
@@ -327,9 +330,9 @@ static void luaparamFlightControlSave(struct luaPropertiesCommon *item, uint8_t 
   }
   else if (arg == lcsConfirmed)
   {
-    if (config.IsFlightControlModified())
+    if (flightControlConfig.IsModified())
     {
-      config.CommitFlightControlChanges();
+      flightControlConfig.Commit();
       newStep = lcsExecuting;
       msg = "Saving...";
     }
@@ -732,8 +735,8 @@ static void registerLuaParameters()
   registerLUAParameter(&luaFlightControlFolder);
   registerLUAParameter(&luaFlightControlAngleMode, [](struct luaPropertiesCommon* item, uint8_t arg) {
     UNUSED(item);
-    config.SetFlightControlAngleMode(arg != 0);
-    config.CommitFlightControlChanges();
+    flightControlConfig.SetAngleMode(arg != 0);
+    flightControlConfig.Commit();
   }, luaFlightControlFolder.common.id);
   registerLUAParameter(&luaFlightControlSave, &luaparamFlightControlSave, luaFlightControlFolder.common.id);
   registerLUAParameter(&luaFlightControlRateFolder, nullptr, luaFlightControlFolder.common.id);
@@ -818,13 +821,13 @@ static int event()
   setLuaTextSelectionValue(&luaTeamracePosition, config.GetTeamracePosition());
 
 #if defined(HAS_BASIC_FLIGHT_CONTROL)
-  setLuaTextSelectionValue(&luaFlightControlAngleMode, config.GetFlightControlAngleMode() ? 1 : 0);
-  if (!config.IsFlightControlModified())
+  setLuaTextSelectionValue(&luaFlightControlAngleMode, flightControlConfig.GetAngleMode() ? 1 : 0);
+  if (!flightControlConfig.IsModified())
   {
     for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)
     {
-      setLuaInt16Value(&luaFlightControlRatePid[i], config.GetFlightControlRatePid()[i]);
-      setLuaInt16Value(&luaFlightControlAnglePid[i], config.GetFlightControlAnglePid()[i]);
+      setLuaInt16Value(&luaFlightControlRatePid[i], flightControlConfig.GetRatePid()[i]);
+      setLuaInt16Value(&luaFlightControlAnglePid[i], flightControlConfig.GetAnglePid()[i]);
     }
   }
 #endif
