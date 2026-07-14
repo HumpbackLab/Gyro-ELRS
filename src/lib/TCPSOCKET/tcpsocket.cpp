@@ -2,31 +2,10 @@
 
 #include "tcpsocket.h"
 #include "logging.h"
-#include "msptypes.h"
-
-#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
-#include "devFlightControl.h"
-#endif
 
 #define TCP_PORT_BETAFLIGHT 5761 //port 5761 as used by BF configurator
 
 TCPSOCKET *TCPSOCKET::instance = NULL;
-
-static void appendU16(uint8_t *payload, uint16_t &offset, uint16_t value)
-{
-    payload[offset++] = value & 0xFF;
-    payload[offset++] = value >> 8;
-}
-
-static void appendI16(uint8_t *payload, uint16_t &offset, int16_t value)
-{
-    appendU16(payload, offset, (uint16_t)value);
-}
-
-static int16_t scaledFloatToI16(float value, float scale)
-{
-    return (int16_t)constrain((int32_t)lroundf(value * scale), -32768, 32767);
-}
 
 void TCPSOCKET::begin()
 {
@@ -85,32 +64,21 @@ bool TCPSOCKET::handleLocalMspRequest(const uint8_t *data, uint16_t len)
         return false;
     }
 
-    if (function != MSP_ELRS_FC_DEBUG)
+    if (localMspHandler == nullptr)
     {
         return false;
     }
 
-    uint8_t payload[10];
-    uint16_t offset = 0;
+    uint8_t responsePayload[64];
+    uint16_t responsePayloadLen = 0;
+    if (!localMspHandler(function, &data[8], payloadLen,
+        responsePayload, sizeof(responsePayload), responsePayloadLen) ||
+        responsePayloadLen > sizeof(responsePayload))
+    {
+        return false;
+    }
 
-#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
-    FlightControlDebugSnapshot snapshot = {};
-    flightControlGetDebugSnapshot(snapshot);
-
-    appendI16(payload, offset, scaledFloatToI16(snapshot.attitude.rollDeg, 100.0f));
-    appendI16(payload, offset, scaledFloatToI16(snapshot.attitude.pitchDeg, 100.0f));
-    appendI16(payload, offset, scaledFloatToI16(snapshot.attitude.yawDeg, 100.0f));
-    appendI16(payload, offset, scaledFloatToI16(snapshot.accelAttitude.rollDeg, 100.0f));
-    appendI16(payload, offset, scaledFloatToI16(snapshot.accelAttitude.pitchDeg, 100.0f));
-#else
-    appendI16(payload, offset, 0);
-    appendI16(payload, offset, 0);
-    appendI16(payload, offset, 0);
-    appendI16(payload, offset, 0);
-    appendI16(payload, offset, 0);
-#endif
-
-    writeMspResponse(function, payload, offset);
+    writeMspResponse(function, responsePayload, responsePayloadLen);
     return true;
 }
 

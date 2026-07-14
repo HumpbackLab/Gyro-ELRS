@@ -16,6 +16,12 @@
 
 class TCPSOCKET
 {
+public:
+    using LocalMspHandler = bool (*)(uint16_t function,
+        const uint8_t *requestPayload, uint16_t requestPayloadLen,
+        uint8_t *responsePayload, uint16_t responseCapacity,
+        uint16_t &responsePayloadLen);
+
 private:
     static TCPSOCKET *instance;
     //std::vector<AsyncClient *> clients; // a list to hold all clients for MSP to WIFI bridge nut not using multi-client for now
@@ -42,10 +48,12 @@ private:
     FIFO<BUFFER_INPUT_SIZE> *FIFOin = nullptr;
     CROSSFIRE2MSP *crsf2msp = nullptr;
     MSP2CROSSFIRE *msp2crsf = nullptr;
+    LocalMspHandler localMspHandler = nullptr;
 
 public:
     void begin();
     void handle();
+    void setLocalMspHandler(LocalMspHandler handler) { localMspHandler = handler; }
     void crsfMspIn(uint8_t *data);
     uint8_t crsfCrsfOutAvailable(uint32_t maxLen);
     void crsfCrsfOutPop(uint8_t *data);

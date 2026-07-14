@@ -6,10 +6,19 @@
 #include "FlightControlConfig.h"
 #include "common.h"
 #include "crsf_protocol.h"
+#if defined(USE_MSP_WIFI)
+#include "msptypes.h"
+#include "tcpsocket.h"
+#endif
 #include <Arduino.h>
+#include <math.h>
 
 static FlightControlRuntime runtime;
 static constexpr int FC_READY_RETRY_INTERVAL_MS = 100;
+
+#if defined(USE_MSP_WIFI)
+extern TCPSOCKET wifi2tcp;
+#endif
 
 const FlightControlAttitude &flightControlGetAttitude()
 {
@@ -26,10 +35,56 @@ bool flightControlGetDebugSnapshot(FlightControlDebugSnapshot &snapshot)
     return runtime.getDebugSnapshot(snapshot);
 }
 
+#if defined(USE_MSP_WIFI)
+static void appendU16(uint8_t *payload, uint16_t &offset, uint16_t value)
+{
+    payload[offset++] = value & 0xFF;
+    payload[offset++] = value >> 8;
+}
+
+static void appendI16(uint8_t *payload, uint16_t &offset, int16_t value)
+{
+    appendU16(payload, offset, (uint16_t)value);
+}
+
+static int16_t scaledFloatToI16(float value, float scale)
+{
+    return (int16_t)constrain((int32_t)lroundf(value * scale), -32768, 32767);
+}
+
+static bool handleLocalMspRequest(uint16_t function,
+    const uint8_t *requestPayload, uint16_t requestPayloadLen,
+    uint8_t *responsePayload, uint16_t responseCapacity,
+    uint16_t &responsePayloadLen)
+{
+    (void)requestPayload;
+    (void)requestPayloadLen;
+
+    if (function != MSP_ELRS_FC_DEBUG || responseCapacity < 10)
+    {
+        return false;
+    }
+
+    FlightControlDebugSnapshot snapshot = {};
+    flightControlGetDebugSnapshot(snapshot);
+
+    responsePayloadLen = 0;
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.attitude.rollDeg, 100.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.attitude.pitchDeg, 100.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.attitude.yawDeg, 100.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.accelAttitude.rollDeg, 100.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.accelAttitude.pitchDeg, 100.0f));
+    return true;
+}
+#endif
+
 static void initialize()
 {
     flightControlConfig.Load();
     runtime.begin();
+#if defined(USE_MSP_WIFI)
+    wifi2tcp.setLocalMspHandler(handleLocalMspRequest);
+#endif
 }
 
 static int event()
