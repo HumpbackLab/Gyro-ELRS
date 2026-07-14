@@ -1,64 +1,69 @@
-![Banner](https://github.com/ExpressLRS/ExpressLRS-Hardware/blob/master/img/banner.png?raw=true)
+# Gyro-ExpressLRS (GLRS)
 
-<center>
+[English](#english) | [中文](#中文)
 
-[![Release](https://img.shields.io/github/v/release/ExpressLRS/ExpressLRS?style=flat-square)](https://github.com/ExpressLRS/ExpressLRS/releases)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/ExpressLRS/ExpressLRS/build.yml?logo=github&style=flat-square)](https://github.com/ExpressLRS/ExpressLRS/actions)
-[![License](https://img.shields.io/github/license/ExpressLRS/ExpressLRS?style=flat-square)](https://github.com/ExpressLRS/ExpressLRS/blob/master/LICENSE)
-[![Stars](https://img.shields.io/github/stars/ExpressLRS/ExpressLRS?style=flat-square)](https://github.com/ExpressLRS/ExpressLRS/stargazers)
-[![Chat](https://img.shields.io/discord/596350022191415318?color=%235865F2&logo=discord&logoColor=%23FFFFFF&style=flat-square)](https://discord.gg/expresslrs)
+## English
 
-</center>
+Gyro-ExpressLRS, or **GLRS**, is an open-source radio link and basic flight-control project based on [ExpressLRS 3.x](https://github.com/ExpressLRS/ExpressLRS).
 
-## Support ExpressLRS
-You can support ExpressLRS by contributing code, testing new features, sharing your ideas, or helping others get started. We are exceptionally grateful for those who donate their time to our passion.
+While retaining the low-latency radio link capabilities of ExpressLRS, GLRS adds gyroscope support and basic flight-control functions to the receiver. Its goal is to integrate radio reception, attitude sensing, and basic stabilization control into the same hardware and firmware.
 
-If you don't have time to lend a hand in that way but still want to have an impact, consider donating. Donations are used for infrastructure costs and to buy test equipment needed to further the project and make it securely accessible. ExpressLRS accepts donations through Open Collective, which provides recognition of donors and transparency on how that support is utilized.
+### Features
 
-[![Open Collective backers](https://img.shields.io/opencollective/backers/expresslrs?label=Open%20Collective%20backers&style=flat-square)](https://opencollective.com/expresslrs)
+- Radio control and telemetry link based on ExpressLRS 3.x
+- Receiver-side gyroscope and accelerometer data acquisition
+- Configurable IMU orientation and attitude estimation
+- Basic rate control, attitude stabilization, and PID control
+- Motor and servo mixing outputs
+- Web-based configuration, runtime status, and debugging tools
+- GLRS Configurator for desktop and mobile platforms (work in progress)
 
-We appreciate all forms of contribution and hope you will join us on Discord!
+### Project Status
 
-## Website
-For general information on the project please refer to our guides on the [website](https://www.expresslrs.org/), and our [FAQ](https://www.expresslrs.org/2.0/faq/)
+GLRS is currently under active development and validation. Its flight-control functions are primarily intended for experimentation, learning, and specific hardware integrations. IMU support, pin assignments, and output capabilities vary between receivers. Always perform thorough bench tests before flight, and verify sensor orientation, failsafe behavior, and output ranges.
 
-## About
+### Relationship to ExpressLRS
 
-ExpressLRS is an open source Radio Link for Radio Control applications. Designed to be the best FPV Racing link, it is based on the fantastic Semtech **SX127x**/**SX1280** LoRa hardware combined with an Espressif or STM32 Processor. Using LoRa modulation as well as reduced packet size it achieves best in class range and latency. It achieves this using a highly optimized over-the-air packet structure, giving simultaneous range and latency advantages. It supports both 900 MHz and 2.4 GHz links, each with their own benefits. 900 MHz supports a maximum of 200 Hz packet rate, with higher penetration. 2.4 GHz supports a blistering fast 1000 Hz on [EdgeTX](http://edgetx.org/). With hundreds of different hardware targets from a wide range of hardware manufacturers, the choice of hardware is constantly growing, with different hardware suited to different requirements.
+GLRS is based on ExpressLRS 3.x and extends the receiver with gyroscope and basic flight-control capabilities. This README does not repeat the complete ExpressLRS feature set, hardware compatibility information, or usage instructions. For those details, please refer to the upstream project:
 
-## Configurator
-To configure your ExpressLRS hardware, the ExpressLRS Configurator can be used, which is found here:
+- [ExpressLRS Website and Documentation](https://www.expresslrs.org/)
+- [ExpressLRS GitHub Repository](https://github.com/ExpressLRS/ExpressLRS)
+- [ExpressLRS Configurator](https://github.com/ExpressLRS/ExpressLRS-Configurator)
 
-https://github.com/ExpressLRS/ExpressLRS-Configurator/releases/
+### License
 
-## Community
-We have both a [Discord Server](https://discord.gg/expresslrs) and [Facebook Group](https://www.facebook.com/groups/636441730280366), which have great support for new users and constant ongoing development discussion
+This project retains the open-source license of the upstream project. See [LICENSE](LICENSE) for details.
 
-## Features
+---
 
-ExpressLRS has the following features:
+## 中文
 
-- Up to 1000 Hz Packet Rate
-- Telemetry (Betaflight Lua Compatibility)
-- Wifi Updates
-- Bluetooth or WiFi Sim Joystick
-- Oled & TFT Displays
-- 2.4 GHz, 900 MHz, and Dual-Band RC Link
-- SMD Antenna - allows for easier installation into micros
-- Supported receiver protocols: CRSF, SBUS, SUMD, HoTT Telemetry, and PWM
-- VTX and VRX Frequency adjustments from the Lua
-- Bind Phrases - no need for button binding
+Gyro-ExpressLRS，简称 **GLRS**，是一个基于 [ExpressLRS 3.x](https://github.com/ExpressLRS/ExpressLRS) 开发的开源遥控链路与基础飞控项目。
 
-with many more features on the way!
+本项目在保留 ExpressLRS 低延迟遥控链路能力的基础上，为接收机增加了陀螺仪支持和基础飞控功能，目标是让遥控接收、姿态感知与基础稳定控制能够运行在同一套硬件和固件中。
 
-## Supported Hardware
+### 主要功能
 
-ExpressLRS currently supports hardware from a wide range of manufacturers. In principle, the targets listed in the [ExpressLRS Configurator](https://github.com/ExpressLRS/ExpressLRS-Configurator/releases/) are tested and supported hardware.
+- 基于 ExpressLRS 3.x 的遥控与遥测链路
+- 接收机端陀螺仪与加速度计数据采集
+- IMU 安装方向配置与姿态估计
+- 基础角速度环、姿态稳定和 PID 控制
+- 电机/舵机混控输出
+- Web 配置、运行状态查看与调试支持
+- 配套的 GLRS Configurator 桌面/移动端配置工具（开发中）
 
-Please refer to the [Hardware Selection] page (https://www.expresslrs.org/hardware/hardware-selection/) on the website for guidance. We do not manufacture any of our hardware, so we can only provide limited support for faulty hardware.
+### 项目状态
 
-## Developers
+GLRS 目前仍在开发和验证阶段，飞控功能主要面向实验、学习和特定硬件适配。不同接收机的 IMU、引脚和输出能力可能不同，请在实际飞行前充分进行台架测试，并确认传感器方向、失控保护和输出范围设置正确。
 
-If you are a developer and would like to contribute to the project, feel free to join the [discord](https://discord.gg/expresslrs) and chat about bugs and issues. You can also look for issues at the [GitHub Issue Tracker](https://github.com/ExpressLRS/ExpressLRS/issues). The best thing to do is to submit a Pull Request to the GitHub Repository.
+### 与 ExpressLRS 的关系
 
-![](https://github.com/ExpressLRS/ExpressLRS-Hardware/blob/master/img/community.png?raw=true)
+GLRS 以 ExpressLRS 3.x 为基础，并在接收机侧扩展陀螺仪和基础飞控能力。本 README 不再重复介绍 ExpressLRS 的完整功能、硬件兼容性和使用方法；相关内容请参考上游项目：
+
+- [ExpressLRS 官方网站与文档](https://www.expresslrs.org/)
+- [ExpressLRS GitHub 仓库](https://github.com/ExpressLRS/ExpressLRS)
+- [ExpressLRS Configurator](https://github.com/ExpressLRS/ExpressLRS-Configurator)
+
+### 开源许可
+
+本项目沿用上游项目的开源许可，详情请参阅 [LICENSE](LICENSE)。
