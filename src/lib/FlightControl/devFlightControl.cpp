@@ -4,8 +4,10 @@
 
 #include "FlightControl.h"
 #include "FlightControlConfig.h"
+#include "CRSF.h"
 #include "common.h"
 #include "crsf_protocol.h"
+#include "telemetry.h"
 #if defined(USE_MSP_WIFI)
 #include "msptypes.h"
 #include "tcpsocket.h"
@@ -15,7 +17,11 @@
 
 static FlightControlRuntime runtime;
 static constexpr int FC_READY_RETRY_INTERVAL_MS = 100;
+static constexpr uint32_t FC_ATTITUDE_REPORT_INTERVAL_MS = 100;
+static constexpr float FC_DEGREES_TO_CRSF_ATTITUDE = PI / 180.0f * 10000.0f;
+static uint32_t lastAttitudeReportMs;
 
+extern Telemetry telemetry;
 #if defined(USE_MSP_WIFI)
 extern TCPSOCKET wifi2tcp;
 #endif
@@ -78,10 +84,34 @@ static bool handleLocalMspRequest(uint16_t function,
 }
 #endif
 
+static void reportAttitude(uint32_t nowMs)
+{
+    if ((uint32_t)(nowMs - lastAttitudeReportMs) < FC_ATTITUDE_REPORT_INTERVAL_MS)
+    {
+        return;
+    }
+
+    FlightControlDebugSnapshot snapshot = {};
+    if (!runtime.getDebugSnapshot(snapshot) || !snapshot.attitudeValid)
+    {
+        return;
+    }
+
+    CRSF_MK_FRAME_T(crsf_sensor_attitude_t) crsfAttitude = {0};
+    crsfAttitude.p.pitch = htobe16((int16_t)lroundf(snapshot.attitude.pitchDeg * FC_DEGREES_TO_CRSF_ATTITUDE));
+    crsfAttitude.p.roll = htobe16((int16_t)lroundf(snapshot.attitude.rollDeg * FC_DEGREES_TO_CRSF_ATTITUDE));
+    crsfAttitude.p.yaw = 0;
+    CRSF::SetHeaderAndCrc((uint8_t *)&crsfAttitude, CRSF_FRAMETYPE_ATTITUDE,
+        CRSF_FRAME_SIZE(sizeof(crsf_sensor_attitude_t)), CRSF_ADDRESS_CRSF_TRANSMITTER);
+    telemetry.AppendTelemetryPackage((uint8_t *)&crsfAttitude);
+    lastAttitudeReportMs = nowMs;
+}
+
 static void initialize()
 {
     flightControlConfig.Load();
     runtime.begin();
+    lastAttitudeReportMs = 0;
 #if defined(USE_MSP_WIFI)
     wifi2tcp.setLocalMspHandler(handleLocalMspRequest);
 #endif
@@ -89,11 +119,7 @@ static void initialize()
 
 static int event()
 {
-    if (!runtime.refreshReadyState())
-    {
-        runtime.reset();
-        return FC_READY_RETRY_INTERVAL_MS;
-    }
+    runtime.refreshReadyState();
     return DURATION_IMMEDIATELY;
 }
 
@@ -127,12 +153,20 @@ static int timeout()
         return FC_READY_RETRY_INTERVAL_MS;
     }
 
-    runtime.update(micros());
+    const uint32_t nowUs = micros();
     if (runtime.ready())
     {
-        return 4; // 250Hz, matched to FC_UPDATE_INTERVAL_US
+        runtime.update(nowUs);
     }
-    return FC_READY_RETRY_INTERVAL_MS;
+    else
+    {
+        // Attitude estimation only needs the IMU. Keep it running even when
+        // PID or mixer configuration is incomplete.
+        runtime.updateAttitudeOnly(nowUs);
+    }
+
+    reportAttitude(millis());
+    return 4; // 250Hz, matched to FC_UPDATE_INTERVAL_US
 }
 
 device_t FlightControl_device = {
