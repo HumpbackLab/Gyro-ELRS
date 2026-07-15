@@ -372,6 +372,24 @@ static void FlightControlFloatArrayToJson(JsonObject &json, const char *key, con
   }
 }
 
+static void FlightControlRangeToJson(JsonArray array, const FlightControlChannelRange &range)
+{
+  array.add(range.startUs);
+  array.add(range.endUs);
+}
+
+static bool JsonFlightControlRange(JsonVariant value, uint16_t &startUs, uint16_t &endUs)
+{
+  JsonArray range = value.as<JsonArray>();
+  if (range.size() < 2)
+  {
+    return false;
+  }
+  startUs = range[0].as<uint16_t>();
+  endUs = range[1].as<uint16_t>();
+  return true;
+}
+
 static void JsonFlightControlMixerToConfig(JsonVariant &json)
 {
   if (!json.containsKey("fc_mixer"))
@@ -494,9 +512,24 @@ static void GetConfiguration(AsyncWebServerRequest *request)
     json["config"]["force-tlm"] = config.GetForceTlmOff();
     json["config"]["vbind"] = config.GetBindStorage();
     #if defined(HAS_BASIC_FLIGHT_CONTROL)
-    json["config"]["fc_angle_enabled"] = flightControlConfig.GetAngleMode();
     json["config"]["fc_arm_enabled"] = flightControlConfig.GetArmMode();
+    json["config"]["fc_arm_channel"] = flightControlConfig.GetArmChannel() + 1;
     JsonObject configJson = json["config"];
+    JsonObject modeConditions = configJson["fc_mode_conditions"].to<JsonObject>();
+    const char *modeKeys[] = {nullptr, "rate", "angle"};
+    for (uint8_t mode = FLIGHT_CONTROL_MODE_RATE; mode < FLIGHT_CONTROL_MODE_COUNT; ++mode)
+    {
+      if (!flightControlConfig.GetModeEnabled((FlightControlMode)mode))
+      {
+        continue;
+      }
+      JsonArray condition = modeConditions[modeKeys[mode]].to<JsonArray>();
+      condition.add(flightControlConfig.GetModeChannel((FlightControlMode)mode) + 1);
+      const FlightControlChannelRange &range = flightControlConfig.GetModeRange((FlightControlMode)mode);
+      condition.add(range.startUs);
+      condition.add(range.endUs);
+    }
+    FlightControlRangeToJson(configJson["fc_arm_range"].to<JsonArray>(), flightControlConfig.GetArmRange());
     FlightControlPidToJson(configJson, "fc_rate_pid", flightControlConfig.GetRatePid());
     FlightControlPidToJson(configJson, "fc_angle_pid", flightControlConfig.GetAnglePid());
     FlightControlFloatArrayToJson(configJson, "fc_mixer", flightControlConfig.GetMixer(), flightControlConfig.GetMixerCount());
@@ -714,13 +747,41 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
   JsonPidToConfig(json, "fc_angle_pid", [](uint8_t index, int16_t value) {
     flightControlConfig.SetAnglePid(index, value);
   });
-  if (json.containsKey("fc_angle_enabled"))
+  if (json.containsKey("fc_mode_conditions"))
   {
-    flightControlConfig.SetAngleMode(json["fc_angle_enabled"] | false);
+    JsonObject conditions = json["fc_mode_conditions"].as<JsonObject>();
+    const char *modeKeys[] = {nullptr, "rate", "angle"};
+    for (uint8_t mode = FLIGHT_CONTROL_MODE_RATE; mode < FLIGHT_CONTROL_MODE_COUNT; ++mode)
+    {
+      JsonArray condition = conditions[modeKeys[mode]].as<JsonArray>();
+      flightControlConfig.SetModeEnabled((FlightControlMode)mode, condition.size() >= 3);
+      if (condition.size() >= 3)
+      {
+        const int channel = condition[0] | (FC_MODE_CHANNEL_DEFAULT + 1);
+        flightControlConfig.SetModeChannel((FlightControlMode)mode,
+          (uint8_t)constrain(channel - 1, FC_MODE_CHANNEL_MIN, FC_MODE_CHANNEL_MAX));
+        flightControlConfig.SetModeRange((FlightControlMode)mode,
+          condition[1].as<uint16_t>(), condition[2].as<uint16_t>());
+      }
+    }
   }
   if (json.containsKey("fc_arm_enabled"))
   {
     flightControlConfig.SetArmMode(json["fc_arm_enabled"] | false);
+  }
+  if (json.containsKey("fc_arm_channel"))
+  {
+    const int channel = json["fc_arm_channel"] | (FC_ARM_CHANNEL_DEFAULT + 1);
+    flightControlConfig.SetArmChannel((uint8_t)constrain(channel - 1, FC_MODE_CHANNEL_MIN, FC_MODE_CHANNEL_MAX));
+  }
+  if (json.containsKey("fc_arm_range"))
+  {
+    uint16_t startUs;
+    uint16_t endUs;
+    if (JsonFlightControlRange(json["fc_arm_range"], startUs, endUs))
+    {
+      flightControlConfig.SetArmRange(startUs, endUs);
+    }
   }
   JsonFlightControlMixerToConfig(json);
   JsonFlightControlOrientationToConfig(json);

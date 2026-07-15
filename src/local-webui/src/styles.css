@@ -595,3 +595,18 @@ button:disabled {
     min-width: 900px;
   }
 }
+.range-row {
+  display: grid;
+  grid-template-columns: minmax(5rem, auto) minmax(6rem, 1fr) auto minmax(6rem, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.condition-row {
+  display: grid;
+  grid-template-columns: minmax(5rem, auto) minmax(8rem, 1fr) minmax(6rem, 1fr) auto minmax(6rem, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}

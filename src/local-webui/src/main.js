@@ -679,7 +679,21 @@ async function saveFlight(event) {
   const form = event.currentTarget;
   const nextConfig = {...config()};
   await runBusy(async () => {
-    nextConfig.fc_angle_enabled = form.fc_angle_enabled.checked;
+    nextConfig.fc_mode_conditions = {};
+    ['rate', 'angle'].forEach((mode) => {
+      if (!form[`fc_${mode}_enabled`].checked) return;
+      const channel = intOrDefault(form[`fc_${mode}_channel`].value, 6);
+      const start = intOrDefault(form[`fc_${mode}_start`].value, 0);
+      const end = intOrDefault(form[`fc_${mode}_end`].value, 0);
+      if (start < 900 || end > 2100 || start >= end) throw new Error(`Invalid ${mode.toUpperCase()} activation range`);
+      nextConfig.fc_mode_conditions[mode] = [channel, start, end];
+    });
+    nextConfig.fc_arm_enabled = form.fc_arm_enabled.checked;
+    nextConfig.fc_arm_channel = intOrDefault(form.fc_arm_channel.value, 5);
+    const armStart = intOrDefault(form.fc_arm_start.value, 0);
+    const armEnd = intOrDefault(form.fc_arm_end.value, 0);
+    if (armStart < 900 || armEnd > 2100 || armStart >= armEnd) throw new Error('Invalid ARM activation range');
+    nextConfig.fc_arm_range = [armStart, armEnd];
     nextConfig.fc_rate_pid = readNumGrid(form, 'fc_rate_pid', 3, 4);
     nextConfig.fc_angle_pid = readNumGrid(form, 'fc_angle_pid', 3, 4);
     nextConfig.fc_mixer = readNumGrid(form, 'fc_mixer', motorCount(), 4);
@@ -914,7 +928,8 @@ function renderStatus() {
         <div class="metric"><span>UID Type</span><strong>${escapeHtml(c.uidtype || 'unknown')}</strong></div>
         <div class="metric"><span>Model ID</span><strong>${escapeHtml(c.modelid ?? '255')}</strong></div>
         <div class="metric"><span>Serial Protocol</span><strong>${escapeHtml(serialProtocols.find(([v]) => v === String(c['serial-protocol']))?.[1] || c['serial-protocol'] || 'CRSF')}</strong></div>
-        <div class="metric"><span>Flight Angle Loop</span><strong>${configValue('fc_angle_enabled', false) ? 'Enabled' : 'Disabled'}</strong></div>
+        <div class="metric"><span>Mode Conditions</span><strong>${Object.entries(configValue('fc_mode_conditions', {rate: [6]})).map(([mode, condition]) => `${mode.toUpperCase()} CH${condition[0]}`).join(' · ') || 'MANUAL only'}</strong></div>
+        <div class="metric"><span>ARM Switch</span><strong>${configValue('fc_arm_enabled', false) ? `CH${escapeHtml(configValue('fc_arm_channel', 5))}` : 'Disabled'}</strong></div>
       </section>
       <section class="panel">
         <h2>Sensors</h2>
@@ -1120,7 +1135,11 @@ function renderFlight() {
   const ratePid = configValue('fc_rate_pid', []);
   const anglePid = configValue('fc_angle_pid', []);
   const mixer = configValue('fc_mixer', []);
-  const angleEnabled = configValue('fc_angle_enabled', false);
+  const modeConditions = configValue('fc_mode_conditions', {rate: [6, 1300, 1700]});
+  const armEnabled = configValue('fc_arm_enabled', false);
+  const armChannel = configValue('fc_arm_channel', 5);
+  const armRange = configValue('fc_arm_range', [1700, 2100]);
+  const auxOptions = (selectedChannel) => pwmInputLabels.slice(4).map((label, index) => `<option value="${index + 5}" ${selected(selectedChannel, index + 5)}>${label}</option>`).join('');
   const roll = state.eulerRoll ?? 0;
   const pitch = state.eulerPitch ?? 0;
   const yaw = state.eulerYaw ?? 0;
@@ -1134,15 +1153,19 @@ function renderFlight() {
     <section class="panel">
       <h2>Flight Control</h2>
       <form id="flight-form">
-        <div class="check"><input id="fc_angle_enabled" name="fc_angle_enabled" type="checkbox" ${checked(angleEnabled)}><label for="fc_angle_enabled">Angle loop enabled</label></div>
-        <div class="notice">Rate loop is always active. Angle loop only applies when this switch is on.</div>
+        <div class="row"><label>Mode activation conditions</label>
+          <div class="helper">RATE and ANGLE are optional independent AUX conditions. When neither is active, the mode is MANUAL. ANGLE wins if both are active.</div>
+          ${['RATE', 'ANGLE'].map((mode) => { const condition = modeConditions[mode.toLowerCase()]; const defaults = mode === 'RATE' ? [6, 1300, 1700] : [6, 1700, 2100]; return `<div class="condition-row"><label><input name="fc_${mode.toLowerCase()}_enabled" type="checkbox" ${checked(Boolean(condition))}> ${mode}</label><select name="fc_${mode.toLowerCase()}_channel">${auxOptions(condition?.[0] ?? defaults[0])}</select><input name="fc_${mode.toLowerCase()}_start" type="number" min="900" max="2100" step="25" value="${escapeHtml(condition?.[1] ?? defaults[1])}"><span>to</span><input name="fc_${mode.toLowerCase()}_end" type="number" min="900" max="2100" step="25" value="${escapeHtml(condition?.[2] ?? defaults[2])}"></div>`; }).join('')}
+        </div>
+        <div class="check"><input id="fc_arm_enabled" name="fc_arm_enabled" type="checkbox" ${checked(armEnabled)}><label for="fc_arm_enabled">Enable ARM switch</label></div>
+        <div class="row"><label for="fc_arm_channel">ARM AUX channel</label><select id="fc_arm_channel" name="fc_arm_channel">${auxOptions(armChannel)}</select><div class="range-row"><strong>ARM</strong><input name="fc_arm_start" type="number" min="900" max="2100" step="25" value="${escapeHtml(armRange[0] ?? 1700)}"><span>to</span><input name="fc_arm_end" type="number" min="900" max="2100" step="25" value="${escapeHtml(armRange[1] ?? 2100)}"></div></div>
         <div class="row">
           <label>Rate PID</label>
           ${renderNumGrid('fc_rate_pid', ['Roll', 'Pitch', 'Yaw'], ['Kp', 'Ki', 'Kd', 'I limit'], ratePid, {rowHeader: 'Axis'})}
         </div>
-        <div class="row" id="angle-pid-row" style="display:${angleEnabled ? 'grid' : 'none'};">
+        <div class="row" id="angle-pid-row">
           <label>Angle PID</label>
-          ${renderNumGrid('fc_angle_pid', ['Roll', 'Pitch', 'Yaw'], ['Kp', 'Ki', 'Kd', 'I limit'], anglePid, {rowHeader: 'Axis', disabled: !angleEnabled})}
+          ${renderNumGrid('fc_angle_pid', ['Roll', 'Pitch', 'Yaw'], ['Kp', 'Ki', 'Kd', 'I limit'], anglePid, {rowHeader: 'Axis'})}
         </div>
         <div class="row">
           <label>Mixer</label>
@@ -1464,20 +1487,6 @@ function wireEvents() {
     };
     modelMatchInput.addEventListener('change', syncModelId);
     syncModelId();
-  }
-
-  const anglePidRow = document.querySelector('#angle-pid-row');
-  const angleEnabled = document.querySelector('#fc_angle_enabled');
-  if (anglePidRow && angleEnabled) {
-    const syncAnglePid = () => {
-      const enabled = angleEnabled.checked;
-      anglePidRow.style.display = enabled ? 'grid' : 'none';
-      anglePidRow.querySelectorAll('input').forEach((input) => {
-        input.disabled = !enabled;
-      });
-    };
-    angleEnabled.addEventListener('change', syncAnglePid);
-    syncAnglePid();
   }
 
   syncBindingPreview();

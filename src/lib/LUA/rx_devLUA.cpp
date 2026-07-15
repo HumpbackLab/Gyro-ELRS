@@ -134,10 +134,47 @@ static struct luaItem_folder luaFlightControlAngleFolder = {
     {"Angle PID", CRSF_FOLDER},
 };
 
-static struct luaItem_selection luaFlightControlAngleMode = {
-    {"Angle Mode", CRSF_TEXT_SELECTION},
+static struct luaItem_selection luaFlightControlModeEnabled[] = {
+    {
+        {"Rate Mode", CRSF_TEXT_SELECTION},
+        1,
+        "Off;On",
+        STR_EMPTYSPACE
+    },
+    {
+        {"Angle Mode", CRSF_TEXT_SELECTION},
+        0,
+        "Off;On",
+        STR_EMPTYSPACE
+    },
+};
+
+static struct luaItem_selection luaFlightControlModeChannels[] = {
+    {
+        {"Rate Channel", CRSF_TEXT_SELECTION},
+        1,
+        "AUX1;AUX2;AUX3;AUX4;AUX5;AUX6;AUX7;AUX8;AUX9;AUX10;AUX11;AUX12",
+        STR_EMPTYSPACE
+    },
+    {
+        {"Angle Channel", CRSF_TEXT_SELECTION},
+        1,
+        "AUX1;AUX2;AUX3;AUX4;AUX5;AUX6;AUX7;AUX8;AUX9;AUX10;AUX11;AUX12",
+        STR_EMPTYSPACE
+    },
+};
+
+static struct luaItem_selection luaFlightControlArmEnabled = {
+    {"Arm Switch", CRSF_TEXT_SELECTION},
     0,
     "Off;On",
+    STR_EMPTYSPACE
+};
+
+static struct luaItem_selection luaFlightControlArmChannel = {
+    {"Arm Channel", CRSF_TEXT_SELECTION},
+    0,
+    "AUX1;AUX2;AUX3;AUX4;AUX5;AUX6;AUX7;AUX8;AUX9;AUX10;AUX11;AUX12",
     STR_EMPTYSPACE
 };
 
@@ -733,9 +770,34 @@ static void registerLuaParameters()
 
 #if defined(HAS_BASIC_FLIGHT_CONTROL)
   registerLUAParameter(&luaFlightControlFolder);
-  registerLUAParameter(&luaFlightControlAngleMode, [](struct luaPropertiesCommon* item, uint8_t arg) {
+  registerLUAParameter(&luaFlightControlModeEnabled[0], [](struct luaPropertiesCommon* item, uint8_t arg) {
     UNUSED(item);
-    flightControlConfig.SetAngleMode(arg != 0);
+    flightControlConfig.SetModeEnabled(FLIGHT_CONTROL_MODE_RATE, arg != 0);
+    flightControlConfig.Commit();
+  }, luaFlightControlFolder.common.id);
+  registerLUAParameter(&luaFlightControlModeChannels[0], [](struct luaPropertiesCommon* item, uint8_t arg) {
+    UNUSED(item);
+    flightControlConfig.SetModeChannel(FLIGHT_CONTROL_MODE_RATE, arg + FC_MODE_CHANNEL_MIN);
+    flightControlConfig.Commit();
+  }, luaFlightControlFolder.common.id);
+  registerLUAParameter(&luaFlightControlModeEnabled[1], [](struct luaPropertiesCommon* item, uint8_t arg) {
+    UNUSED(item);
+    flightControlConfig.SetModeEnabled(FLIGHT_CONTROL_MODE_ANGLE, arg != 0);
+    flightControlConfig.Commit();
+  }, luaFlightControlFolder.common.id);
+  registerLUAParameter(&luaFlightControlModeChannels[1], [](struct luaPropertiesCommon* item, uint8_t arg) {
+    UNUSED(item);
+    flightControlConfig.SetModeChannel(FLIGHT_CONTROL_MODE_ANGLE, arg + FC_MODE_CHANNEL_MIN);
+    flightControlConfig.Commit();
+  }, luaFlightControlFolder.common.id);
+  registerLUAParameter(&luaFlightControlArmEnabled, [](struct luaPropertiesCommon* item, uint8_t arg) {
+    UNUSED(item);
+    flightControlConfig.SetArmMode(arg != 0);
+    flightControlConfig.Commit();
+  }, luaFlightControlFolder.common.id);
+  registerLUAParameter(&luaFlightControlArmChannel, [](struct luaPropertiesCommon* item, uint8_t arg) {
+    UNUSED(item);
+    flightControlConfig.SetArmChannel(arg + FC_MODE_CHANNEL_MIN);
     flightControlConfig.Commit();
   }, luaFlightControlFolder.common.id);
   registerLUAParameter(&luaFlightControlSave, &luaparamFlightControlSave, luaFlightControlFolder.common.id);
@@ -821,7 +883,12 @@ static int event()
   setLuaTextSelectionValue(&luaTeamracePosition, config.GetTeamracePosition());
 
 #if defined(HAS_BASIC_FLIGHT_CONTROL)
-  setLuaTextSelectionValue(&luaFlightControlAngleMode, flightControlConfig.GetAngleMode() ? 1 : 0);
+  setLuaTextSelectionValue(&luaFlightControlModeEnabled[0], flightControlConfig.GetModeEnabled(FLIGHT_CONTROL_MODE_RATE) ? 1 : 0);
+  setLuaTextSelectionValue(&luaFlightControlModeChannels[0], flightControlConfig.GetModeChannel(FLIGHT_CONTROL_MODE_RATE) - FC_MODE_CHANNEL_MIN);
+  setLuaTextSelectionValue(&luaFlightControlModeEnabled[1], flightControlConfig.GetModeEnabled(FLIGHT_CONTROL_MODE_ANGLE) ? 1 : 0);
+  setLuaTextSelectionValue(&luaFlightControlModeChannels[1], flightControlConfig.GetModeChannel(FLIGHT_CONTROL_MODE_ANGLE) - FC_MODE_CHANNEL_MIN);
+  setLuaTextSelectionValue(&luaFlightControlArmEnabled, flightControlConfig.GetArmMode() ? 1 : 0);
+  setLuaTextSelectionValue(&luaFlightControlArmChannel, flightControlConfig.GetArmChannel() - FC_MODE_CHANNEL_MIN);
   if (!flightControlConfig.IsModified())
   {
     for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)

@@ -18,6 +18,7 @@ static constexpr uint16_t FC_COMPLEMENTARY_ALPHA_PERMILLE = (uint16_t)(FC_COMPLE
 static constexpr float FC_STANDARD_GRAVITY = 9.80665f;
 static constexpr uint8_t FC_PID_COLUMNS = 4;
 static constexpr uint8_t FC_PID_AXES = 3;
+static constexpr float FC_MANUAL_CONTROL_RANGE = 500.0f;
 // fc.json stores PID values in centi-units for LUA/CRSF int16 transport;
 // restore them to the same floating-point units shown in the WebUI.
 static constexpr float FC_PID_CONFIG_SCALE = 0.01f;
@@ -231,7 +232,9 @@ void FlightControlRuntime::reset()
 {
     _estimator.reset();
     resetPidState();
-    _mixerOutput = {};
+    // Preserve the configured motor count so consumers can actively drive a
+    // safe minimum output instead of retaining the last control value.
+    _mixerOutput = _mixer.mix(0.0f, 0.0f, 0.0f, 0.0f);
     _lastImuSample = {};
     _lastDebugUpdateMs = 0;
     _lastUpdateDtUs = 0;
@@ -263,13 +266,6 @@ bool FlightControlRuntime::refreshReadyState()
 bool FlightControlRuntime::loadPidParameters()
 {
     const bool rateReady = loadPidBank(_rollRatePid, _pitchRatePid, _yawRatePid, flightControlConfig.GetRatePid(), FC_PID_TERM_COUNT);
-    _angleEnabled = flightControlConfig.GetAngleMode();
-
-    if (!_angleEnabled)
-    {
-        return rateReady;
-    }
-
     const bool angleReady = loadPidBank(_rollAnglePid, _pitchAnglePid, _yawAnglePid, flightControlConfig.GetAnglePid(), FC_PID_TERM_COUNT);
     return rateReady && angleReady;
 }
@@ -338,6 +334,26 @@ void FlightControlRuntime::loadStickTargets(float &throttle, float &roll, float 
     yaw = -constrain((yawUs - 1500.0f) / 500.0f, -1.0f, 1.0f) * FC_MAX_YAW_RATE_DPS;
 }
 
+FlightControlMode FlightControlRuntime::readModeSwitch() const
+{
+    // Like INAV mode activation conditions, ranges are left-closed and
+    // right-open. ANGLE takes priority if both optional conditions overlap;
+    // MANUAL is the implicit fallback when neither condition is active.
+    const uint8_t angleChannel = flightControlConfig.GetModeChannel(FLIGHT_CONTROL_MODE_ANGLE);
+    if (flightControlConfig.GetModeEnabled(FLIGHT_CONTROL_MODE_ANGLE) &&
+        FlightControlRangeIsActive(flightControlConfig.GetModeRange(FLIGHT_CONTROL_MODE_ANGLE), CRSF_to_US(ChannelData[angleChannel])))
+    {
+        return FLIGHT_CONTROL_MODE_ANGLE;
+    }
+    const uint8_t rateChannel = flightControlConfig.GetModeChannel(FLIGHT_CONTROL_MODE_RATE);
+    if (flightControlConfig.GetModeEnabled(FLIGHT_CONTROL_MODE_RATE) &&
+        FlightControlRangeIsActive(flightControlConfig.GetModeRange(FLIGHT_CONTROL_MODE_RATE), CRSF_to_US(ChannelData[rateChannel])))
+    {
+        return FLIGHT_CONTROL_MODE_RATE;
+    }
+    return FLIGHT_CONTROL_MODE_MANUAL;
+}
+
 void FlightControlRuntime::update(uint32_t nowUs)
 {
     if (!refreshReadyState())
@@ -369,7 +385,17 @@ void FlightControlRuntime::update(uint32_t nowUs)
     _lastSampleAgeMs = sample.timestampMs == 0 ? 0 : (uint16_t)constrain((uint32_t)(_lastDebugUpdateMs - sample.timestampMs), 0U, 65535U);
     _estimator.update(sample, dt);
 
-    if (flightControlConfig.GetArmMode() && !CRSF_to_BIT(ChannelData[4]))
+    const FlightControlMode nextMode = readModeSwitch();
+    if (nextMode != _mode)
+    {
+        resetPidState();
+        _mode = nextMode;
+    }
+
+    const uint8_t armChannel = flightControlConfig.GetArmChannel();
+    const bool armActive = FlightControlRangeIsActive(
+        flightControlConfig.GetArmRange(), CRSF_to_US(ChannelData[armChannel]));
+    if (flightControlConfig.GetArmMode() && !armActive)
     {
         resetPidState();
         return;
@@ -381,10 +407,19 @@ void FlightControlRuntime::update(uint32_t nowUs)
     float yawRateTarget;
     loadStickTargets(throttle, rollAngleTarget, pitchAngleTarget, yawRateTarget);
 
+    if (_mode == FLIGHT_CONTROL_MODE_MANUAL)
+    {
+        const float roll = rollAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MANUAL_CONTROL_RANGE;
+        const float pitch = pitchAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MANUAL_CONTROL_RANGE;
+        const float yaw = yawRateTarget / FC_MAX_YAW_RATE_DPS * FC_MANUAL_CONTROL_RANGE;
+        _mixerOutput = _mixer.mix(throttle, roll, pitch, yaw);
+        return;
+    }
+
     float rollRateTarget = rollAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MAX_YAW_RATE_DPS;
     float pitchRateTarget = pitchAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MAX_YAW_RATE_DPS;
 
-    if (_angleEnabled)
+    if (_mode == FLIGHT_CONTROL_MODE_ANGLE)
     {
         rollRateTarget = _rollAnglePid.update(rollAngleTarget, _estimator.attitude().rollDeg, dt);
         pitchRateTarget = _pitchAnglePid.update(pitchAngleTarget, _estimator.attitude().pitchDeg, dt);
@@ -414,7 +449,7 @@ bool FlightControlRuntime::getDebugSnapshot(FlightControlDebugSnapshot &snapshot
     snapshot.sensorsReady = _sensorsReady;
     snapshot.mixerReady = _mixerReady;
     snapshot.pidReady = _pidReady;
-    snapshot.angleEnabled = _angleEnabled;
+    snapshot.mode = _mode;
     snapshot.attitudeValid = _estimator.attitudeValid();
     return _lastDebugUpdateMs != 0;
 }

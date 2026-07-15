@@ -76,12 +76,14 @@ public:
     bool ready() const { return _sensorsReady && _mixerReady && _pidReady; }
     const FlightControlAttitude &attitude() const { return _estimator.attitude(); }
     const FlightControlMixerOutput &mixerOutput() const { return _mixerOutput; }
+    FlightControlMode mode() const { return _mode; }
     bool getDebugSnapshot(FlightControlDebugSnapshot &snapshot) const;
 
 private:
     bool loadPidParameters();
     bool loadPidBank(FlightControlPid &rollPid, FlightControlPid &pitchPid, FlightControlPid &yawPid, const int16_t *pid, int count);
     void loadStickTargets(float &throttle, float &rollAngle, float &pitchAngle, float &yawRate);
+    FlightControlMode readModeSwitch() const;
     void resetPidState();
 
     FlightControlSensorBackend _sensors;
@@ -103,7 +105,7 @@ private:
     bool _sensorsReady = false;
     bool _mixerReady = false;
     bool _pidReady = false;
-    bool _angleEnabled = false;
+    FlightControlMode _mode = FLIGHT_CONTROL_MODE_MANUAL;
 };
 
 #endif

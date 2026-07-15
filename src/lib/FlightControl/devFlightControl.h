@@ -3,6 +3,7 @@
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
 
 #include "device.h"
+#include "FlightControlConfig.h"
 #include <stdint.h>
 
 #define FLIGHT_CONTROL_MAX_MOTORS 8
@@ -46,7 +47,7 @@ struct FlightControlDebugSnapshot {
     bool sensorsReady;
     bool mixerReady;
     bool pidReady;
-    bool angleEnabled;
+    FlightControlMode mode;
     bool attitudeValid;
 };
 

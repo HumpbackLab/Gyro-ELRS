@@ -137,6 +137,28 @@ static bool rcInputReady()
             return false;
         }
     }
+    for (uint8_t mode = FLIGHT_CONTROL_MODE_RATE; mode < FLIGHT_CONTROL_MODE_COUNT; ++mode)
+    {
+        if (!flightControlConfig.GetModeEnabled((FlightControlMode)mode))
+        {
+            continue;
+        }
+        const uint8_t modeChannel = flightControlConfig.GetModeChannel((FlightControlMode)mode);
+        if (modeChannel < FC_MODE_CHANNEL_MIN || modeChannel > FC_MODE_CHANNEL_MAX ||
+            ChannelData[modeChannel] < CRSF_CHANNEL_VALUE_MIN || ChannelData[modeChannel] > CRSF_CHANNEL_VALUE_MAX)
+        {
+            return false;
+        }
+    }
+    if (flightControlConfig.GetArmMode())
+    {
+        const uint8_t armChannel = flightControlConfig.GetArmChannel();
+        if (armChannel < FC_MODE_CHANNEL_MIN || armChannel > FC_MODE_CHANNEL_MAX ||
+            ChannelData[armChannel] < CRSF_CHANNEL_VALUE_MIN || ChannelData[armChannel] > CRSF_CHANNEL_VALUE_MAX)
+        {
+            return false;
+        }
+    }
     return true;
 }
 

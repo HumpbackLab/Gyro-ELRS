@@ -34,7 +34,9 @@ static bool flightControlMotorOutputEnabled()
         return true;
     }
 
-    return CRSF_to_BIT(ChannelData[4]);
+    const uint8_t armChannel = flightControlConfig.GetArmChannel();
+    return FlightControlRangeIsActive(
+        flightControlConfig.GetArmRange(), CRSF_to_US(ChannelData[armChannel]));
 }
 #endif
 
