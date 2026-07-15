@@ -2,7 +2,7 @@
 
 #if defined(PLATFORM_ESP8266) || defined(PLATFORM_ESP32)
 
-#if !defined(LOCAL_WEBUI)
+#if !defined(EXTERNAL_CONFIGURATOR_ONLY)
 #define WIFI_ENABLE_MDNS
 #endif
 
@@ -57,7 +57,7 @@
 #include "FlightControlConfig.h"
 #endif
 
-#if !defined(LOCAL_WEBUI)
+#if !defined(EXTERNAL_CONFIGURATOR_ONLY)
 #include "WebContent.h"
 #endif
 
@@ -116,16 +116,6 @@ static bool target_complete = false;
 static bool force_update = false;
 static uint32_t totalSize;
 
-#if defined(LOCAL_WEBUI)
-static const char LOCAL_WEBUI_HTML[] PROGMEM =
-  "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-  "<title>ExpressLRS</title></head><body>"
-  "<h1>ExpressLRS device API</h1>"
-  "<p>The Web UI is no longer stored in this firmware. Open the local ExpressLRS Web UI package on your computer and connect it to this device.</p>"
-  "<p>Default AP API address: <code>http://10.0.0.1</code></p>"
-  "</body></html>";
-#endif
-
 void setWifiUpdateMode()
 {
   // No need to ExitBindingMode(), the radio will be stopped stopped when start the Wifi service.
@@ -173,7 +163,7 @@ static bool captivePortal(AsyncWebServerRequest *request)
   return false;
 }
 
-#if !defined(LOCAL_WEBUI)
+#if !defined(EXTERNAL_CONFIGURATOR_ONLY)
 static struct {
   const char *url;
   const char *contentType;
@@ -194,7 +184,7 @@ static struct {
 };
 #endif
 
-#if !defined(LOCAL_WEBUI)
+#if !defined(EXTERNAL_CONFIGURATOR_ONLY)
 static void WebUpdateSendContent(AsyncWebServerRequest *request)
 {
   for (size_t i=0 ; i<ARRAY_SIZE(files) ; i++) {
@@ -216,8 +206,8 @@ static void WebUpdateHandleRoot(AsyncWebServerRequest *request)
     return;
   }
   force_update = request->hasArg("force");
-#if defined(LOCAL_WEBUI)
-  AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", (const uint8_t *)LOCAL_WEBUI_HTML, sizeof(LOCAL_WEBUI_HTML) - 1);
+#if defined(EXTERNAL_CONFIGURATOR_ONLY)
+  request->send(200, "text/plain", "Configure this device with Gyro ELRS Configurator at http://10.0.0.1");
 #else
   AsyncWebServerResponse *response;
   if (connectionState == hardwareUndefined)
@@ -229,11 +219,11 @@ static void WebUpdateHandleRoot(AsyncWebServerRequest *request)
     response = request->beginResponse_P(200, "text/html", (uint8_t*)INDEX_HTML, sizeof(INDEX_HTML));
   }
   response->addHeader("Content-Encoding", "gzip");
-#endif
   response->addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   response->addHeader("Pragma", "no-cache");
   response->addHeader("Expires", "-1");
   request->send(response);
+#endif
 }
 
 static void putFile(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
@@ -1321,7 +1311,7 @@ static void startServices()
   }
 
   server.on("/", WebUpdateHandleRoot);
-#if !defined(LOCAL_WEBUI)
+#if !defined(EXTERNAL_CONFIGURATOR_ONLY)
   server.on("/elrs.css", WebUpdateSendContent);
   server.on("/mui.js", WebUpdateSendContent);
   server.on("/scan.js", WebUpdateSendContent);
@@ -1342,7 +1332,7 @@ static void startServices()
   server.on("/update", HTTP_OPTIONS, corsPreflightResponse);
   server.on("/forceupdate", WebUploadForceUpdateHandler);
   server.on("/forceupdate", HTTP_OPTIONS, corsPreflightResponse);
-#if !defined(LOCAL_WEBUI)
+#if !defined(EXTERNAL_CONFIGURATOR_ONLY)
   server.on("/cw.html", WebUpdateSendContent);
   server.on("/cw.js", WebUpdateSendContent);
 #endif
@@ -1353,7 +1343,7 @@ static void startServices()
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "POST,GET,OPTIONS");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "*");
 
-#if !defined(LOCAL_WEBUI)
+#if !defined(EXTERNAL_CONFIGURATOR_ONLY)
   server.on("/hardware.html", WebUpdateSendContent);
   server.on("/hardware.js", WebUpdateSendContent);
 #endif
@@ -1379,7 +1369,7 @@ static void startServices()
   #endif
 
   #if defined(RADIO_LR1121)
-  #if !defined(LOCAL_WEBUI)
+  #if !defined(EXTERNAL_CONFIGURATOR_ONLY)
     server.on("/lr1121.html", WebUpdateSendContent);
     server.on("/lr1121.js", WebUpdateSendContent);
   #endif

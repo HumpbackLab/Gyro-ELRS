@@ -50,7 +50,8 @@ jobs:
 
           PRODUCT_NAME=$(jq -er '.jumper.rx_2400["lightfin-nano"].product_name' hardware/targets.json)
           SAFE_VERSION=${RELEASE_VERSION//\//-}
-          ASSET_NAME="${PRODUCT_NAME}_${SAFE_VERSION}.bin"
+          ASSET_PRODUCT_NAME=${PRODUCT_NAME// /.}
+          ASSET_NAME="${ASSET_PRODUCT_NAME}_${SAFE_VERSION}.bin"
           mkdir -p ../release-assets
           cp .pio/build/Unified_ESP32C3_2400_RX_via_WIFI/firmware.bin "../release-assets/${ASSET_NAME}"
           ASSET_SIZE=$(stat -c%s "../release-assets/${ASSET_NAME}")
@@ -58,7 +59,7 @@ jobs:
           ENCODED_TAG=$(jq -rn --arg value "$RELEASE_VERSION" '$value|@uri')
           ENCODED_ASSET=$(jq -rn --arg value "$ASSET_NAME" '$value|@uri')
           GITHUB_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${ENCODED_TAG}/${ENCODED_ASSET}"
-          GITEE_URL="https://raw.giteeusercontent.com/ncer/Gyro-ELRS/raw/elrs_fc/updater/firmware/firmware-latest.bin"
+          GITEE_URL="https://gitee.com/ncer/Gyro-ELRS/releases/download/${ENCODED_TAG}/${ENCODED_ASSET}"
 
           jq -n \
             --arg version "$RELEASE_VERSION" \
@@ -83,3 +84,26 @@ jobs:
           ASSET_PATH: ${{ steps.build.outputs.asset }}
           MANIFEST_PATH: ${{ steps.build.outputs.manifest }}
         run: gh release upload "$RELEASE_TAG" "$ASSET_PATH" "$MANIFEST_PATH" --clobber
+
+  sync-gitee:
+    name: Sync firmware to Gitee
+    needs: build-and-upload
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Sync firmware and manifest to Gitee
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_FIRMWARE_REPOSITORY: ncer/Gyro-ELRS
+          GITEE_FIRMWARE_BRANCH: elrs_fc
+        run: |
+          ./scripts/sync-firmware-to-gitee.sh \
+            "${{ github.repository }}" \
+            "$GITEE_FIRMWARE_REPOSITORY" \
+            "${{ github.event.release.tag_name }}"
