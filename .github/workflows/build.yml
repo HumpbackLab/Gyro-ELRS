@@ -149,7 +149,7 @@ jobs:
       - name: Checkout targets repo
         uses: actions/checkout@v4
         with:
-          repository: ExpressLRS/targets
+          repository: HumpbackLab/GYRO-ELRS-Targets
           path: src/hardware
 
       - name: Get firmware artifacts
