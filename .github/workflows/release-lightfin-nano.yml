@@ -1,0 +1,85 @@
+name: Release LightFin Nano firmware
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Checkout hardware targets
+        uses: actions/checkout@v4
+        with:
+          repository: HumpbackLab/GYRO-ELRS-Targets
+          path: src/hardware
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-platformio-lightfin-nano
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio wheel
+
+      - name: Build configured firmware
+        id: build
+        env:
+          RELEASE_VERSION: ${{ github.event.release.tag_name }}
+          PUBLISHED_AT: ${{ github.event.release.published_at }}
+        run: |
+          cd src
+          sed -i '/^\[env:Unified_ESP32C3_2400_RX_via_WIFI\]$/a board_config = jumper.rx_2400.lightfin-nano' targets/unified.ini
+          PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_ISM_2400" pio run -e Unified_ESP32C3_2400_RX_via_WIFI
+
+          PRODUCT_NAME=$(jq -er '.jumper.rx_2400["lightfin-nano"].product_name' hardware/targets.json)
+          SAFE_VERSION=${RELEASE_VERSION//\//-}
+          ASSET_NAME="${PRODUCT_NAME}_${SAFE_VERSION}.bin"
+          mkdir -p ../release-assets
+          cp .pio/build/Unified_ESP32C3_2400_RX_via_WIFI/firmware.bin "../release-assets/${ASSET_NAME}"
+          ASSET_SIZE=$(stat -c%s "../release-assets/${ASSET_NAME}")
+          ASSET_SHA256=$(sha256sum "../release-assets/${ASSET_NAME}" | cut -d' ' -f1)
+          ENCODED_TAG=$(jq -rn --arg value "$RELEASE_VERSION" '$value|@uri')
+          ENCODED_ASSET=$(jq -rn --arg value "$ASSET_NAME" '$value|@uri')
+          GITHUB_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${ENCODED_TAG}/${ENCODED_ASSET}"
+          GITEE_URL="https://raw.giteeusercontent.com/ncer/Gyro-ELRS/raw/elrs_fc/updater/firmware/firmware-latest.bin"
+
+          jq -n \
+            --arg version "$RELEASE_VERSION" \
+            --arg published_at "$PUBLISHED_AT" \
+            --arg product_name "$PRODUCT_NAME" \
+            --arg target "Unified_ESP32C3_2400_RX" \
+            --arg filename "$ASSET_NAME" \
+            --arg sha256 "$ASSET_SHA256" \
+            --arg github_url "$GITHUB_URL" \
+            --arg gitee_url "$GITEE_URL" \
+            --argjson size "$ASSET_SIZE" \
+            '{schema: 1, version: $version, published_at: $published_at, firmwares: [{product_name: $product_name, target: $target, filename: $filename, size: $size, sha256: $sha256, sources: {github: $github_url, gitee: $gitee_url}}]}' \
+            > ../release-assets/firmware-latest.json
+
+          echo "asset=release-assets/${ASSET_NAME}" >> "$GITHUB_OUTPUT"
+          echo "manifest=release-assets/firmware-latest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Upload firmware and manifest to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          ASSET_PATH: ${{ steps.build.outputs.asset }}
+          MANIFEST_PATH: ${{ steps.build.outputs.manifest }}
+        run: gh release upload "$RELEASE_TAG" "$ASSET_PATH" "$MANIFEST_PATH" --clobber
