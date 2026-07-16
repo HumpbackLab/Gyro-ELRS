@@ -127,11 +127,29 @@ static struct luaItem_folder luaFlightControlFolder = {
 };
 
 static struct luaItem_folder luaFlightControlRateFolder = {
-    {"Rate PID", CRSF_FOLDER},
+    {"Rate PID (/100)", CRSF_FOLDER},
 };
 
 static struct luaItem_folder luaFlightControlAngleFolder = {
-    {"Angle PID", CRSF_FOLDER},
+    {"Angle PID (/100)", CRSF_FOLDER},
+};
+
+static constexpr uint8_t LUA_FC_PID_COLUMNS = 4;
+static constexpr uint8_t LUA_FC_PID_AXES = FC_PID_TERM_COUNT / LUA_FC_PID_COLUMNS;
+static_assert(FC_PID_TERM_COUNT % LUA_FC_PID_COLUMNS == 0, "PID terms must contain complete axes");
+
+static struct luaItem_selection luaFlightControlRateAxis = {
+    {"Axis", CRSF_TEXT_SELECTION},
+    0,
+    "Roll;Pitch;Yaw",
+    STR_EMPTYSPACE
+};
+
+static struct luaItem_selection luaFlightControlAngleAxis = {
+    {"Axis", CRSF_TEXT_SELECTION},
+    0,
+    "Roll;Pitch;Yaw",
+    STR_EMPTYSPACE
 };
 
 static struct luaItem_selection luaFlightControlModeEnabled[] = {
@@ -189,42 +207,26 @@ static struct luaItem_command luaFlightControlSave = {
   {label, CRSF_INT16}, \
   { \
     { \
-      (int16_t)0, \
-      (int16_t)0, \
-      (int16_t)20000, \
+      (uint16_t)0, \
+      (uint16_t)0, \
+      htobe16(20000), \
     } \
   }, \
-  " x100" \
+  STR_EMPTYSPACE \
 }
 
 static struct luaItem_int16 luaFlightControlRatePid[] = {
-    LUA_PID_INT16_ITEM("Roll Kp"),
-    LUA_PID_INT16_ITEM("Roll Ki"),
-    LUA_PID_INT16_ITEM("Roll Kd"),
-    LUA_PID_INT16_ITEM("Roll ILim"),
-    LUA_PID_INT16_ITEM("Pitch Kp"),
-    LUA_PID_INT16_ITEM("Pitch Ki"),
-    LUA_PID_INT16_ITEM("Pitch Kd"),
-    LUA_PID_INT16_ITEM("Pitch ILim"),
-    LUA_PID_INT16_ITEM("Yaw Kp"),
-    LUA_PID_INT16_ITEM("Yaw Ki"),
-    LUA_PID_INT16_ITEM("Yaw Kd"),
-    LUA_PID_INT16_ITEM("Yaw ILim"),
+    LUA_PID_INT16_ITEM("Kp"),
+    LUA_PID_INT16_ITEM("Ki"),
+    LUA_PID_INT16_ITEM("Kd"),
+    LUA_PID_INT16_ITEM("ILim"),
 };
 
 static struct luaItem_int16 luaFlightControlAnglePid[] = {
-    LUA_PID_INT16_ITEM("Roll Kp"),
-    LUA_PID_INT16_ITEM("Roll Ki"),
-    LUA_PID_INT16_ITEM("Roll Kd"),
-    LUA_PID_INT16_ITEM("Roll ILim"),
-    LUA_PID_INT16_ITEM("Pitch Kp"),
-    LUA_PID_INT16_ITEM("Pitch Ki"),
-    LUA_PID_INT16_ITEM("Pitch Kd"),
-    LUA_PID_INT16_ITEM("Pitch ILim"),
-    LUA_PID_INT16_ITEM("Yaw Kp"),
-    LUA_PID_INT16_ITEM("Yaw Ki"),
-    LUA_PID_INT16_ITEM("Yaw Kd"),
-    LUA_PID_INT16_ITEM("Yaw ILim"),
+    LUA_PID_INT16_ITEM("Kp"),
+    LUA_PID_INT16_ITEM("Ki"),
+    LUA_PID_INT16_ITEM("Kd"),
+    LUA_PID_INT16_ITEM("ILim"),
 };
 
 #undef LUA_PID_INT16_ITEM
@@ -331,15 +333,34 @@ static int findFlightControlPidIndex(const struct luaPropertiesCommon *item, con
   return -1;
 }
 
+static void updateFlightControlPidFields(struct luaItem_int16 *items, const int16_t *pid, uint8_t axis)
+{
+  if (axis >= LUA_FC_PID_AXES)
+  {
+    return;
+  }
+
+  const uint8_t offset = axis * LUA_FC_PID_COLUMNS;
+  for (uint8_t i = 0; i < LUA_FC_PID_COLUMNS; ++i)
+  {
+    setLuaInt16Value(&items[i], pid[offset + i]);
+  }
+}
+
 static void luaparamFlightControlRatePid(struct luaPropertiesCommon *item, uint8_t arg)
 {
   UNUSED(arg);
   int16_t value;
-  const int index = findFlightControlPidIndex(item, luaFlightControlRatePid, FC_PID_TERM_COUNT);
-  if (index >= 0 && luaGetUpdateValueInt16(&value))
+  const int term = findFlightControlPidIndex(item, luaFlightControlRatePid, LUA_FC_PID_COLUMNS);
+  if (term >= 0 && luaGetUpdateValueInt16(&value))
   {
+    const uint8_t index = luaFlightControlRateAxis.value * LUA_FC_PID_COLUMNS + term;
     flightControlConfig.SetRatePid(index, value);
-    flightControlConfig.Commit();
+    if (flightControlConfig.Commit())
+    {
+      setLuaInt16Value(&luaFlightControlRatePid[term], value);
+      devicesTriggerEvent();
+    }
   }
 }
 
@@ -347,11 +368,16 @@ static void luaparamFlightControlAnglePid(struct luaPropertiesCommon *item, uint
 {
   UNUSED(arg);
   int16_t value;
-  const int index = findFlightControlPidIndex(item, luaFlightControlAnglePid, FC_PID_TERM_COUNT);
-  if (index >= 0 && luaGetUpdateValueInt16(&value))
+  const int term = findFlightControlPidIndex(item, luaFlightControlAnglePid, LUA_FC_PID_COLUMNS);
+  if (term >= 0 && luaGetUpdateValueInt16(&value))
   {
+    const uint8_t index = luaFlightControlAngleAxis.value * LUA_FC_PID_COLUMNS + term;
     flightControlConfig.SetAnglePid(index, value);
-    flightControlConfig.Commit();
+    if (flightControlConfig.Commit())
+    {
+      setLuaInt16Value(&luaFlightControlAnglePid[term], value);
+      devicesTriggerEvent();
+    }
   }
 }
 
@@ -802,12 +828,30 @@ static void registerLuaParameters()
   }, luaFlightControlFolder.common.id);
   registerLUAParameter(&luaFlightControlSave, &luaparamFlightControlSave, luaFlightControlFolder.common.id);
   registerLUAParameter(&luaFlightControlRateFolder, nullptr, luaFlightControlFolder.common.id);
-  for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)
+  registerLUAParameter(&luaFlightControlRateAxis, [](struct luaPropertiesCommon* item, uint8_t arg) {
+    UNUSED(item);
+    if (arg >= LUA_FC_PID_AXES)
+    {
+      return;
+    }
+    setLuaTextSelectionValue(&luaFlightControlRateAxis, arg);
+    updateFlightControlPidFields(luaFlightControlRatePid, flightControlConfig.GetRatePid(), arg);
+  }, luaFlightControlRateFolder.common.id);
+  for (uint8_t i = 0; i < LUA_FC_PID_COLUMNS; ++i)
   {
     registerLUAParameter(&luaFlightControlRatePid[i], &luaparamFlightControlRatePid, luaFlightControlRateFolder.common.id);
   }
   registerLUAParameter(&luaFlightControlAngleFolder, nullptr, luaFlightControlFolder.common.id);
-  for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)
+  registerLUAParameter(&luaFlightControlAngleAxis, [](struct luaPropertiesCommon* item, uint8_t arg) {
+    UNUSED(item);
+    if (arg >= LUA_FC_PID_AXES)
+    {
+      return;
+    }
+    setLuaTextSelectionValue(&luaFlightControlAngleAxis, arg);
+    updateFlightControlPidFields(luaFlightControlAnglePid, flightControlConfig.GetAnglePid(), arg);
+  }, luaFlightControlAngleFolder.common.id);
+  for (uint8_t i = 0; i < LUA_FC_PID_COLUMNS; ++i)
   {
     registerLUAParameter(&luaFlightControlAnglePid[i], &luaparamFlightControlAnglePid, luaFlightControlAngleFolder.common.id);
   }
@@ -891,11 +935,8 @@ static int event()
   setLuaTextSelectionValue(&luaFlightControlArmChannel, flightControlConfig.GetArmChannel() - FC_MODE_CHANNEL_MIN);
   if (!flightControlConfig.IsModified())
   {
-    for (uint8_t i = 0; i < FC_PID_TERM_COUNT; ++i)
-    {
-      setLuaInt16Value(&luaFlightControlRatePid[i], flightControlConfig.GetRatePid()[i]);
-      setLuaInt16Value(&luaFlightControlAnglePid[i], flightControlConfig.GetAnglePid()[i]);
-    }
+    updateFlightControlPidFields(luaFlightControlRatePid, flightControlConfig.GetRatePid(), luaFlightControlRateAxis.value);
+    updateFlightControlPidFields(luaFlightControlAnglePid, flightControlConfig.GetAnglePid(), luaFlightControlAngleAxis.value);
   }
 #endif
 
