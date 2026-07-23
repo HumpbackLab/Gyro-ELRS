@@ -20,11 +20,21 @@ void FlightControlConfig::SetDefaults()
     memset(m_anglePid, 0, sizeof(m_anglePid));
     memset(m_mixer, 0, sizeof(m_mixer));
     memset(m_orientation, 0, sizeof(m_orientation));
+    for (uint8_t output = 0; output < FC_PWM_OUTPUT_MAX_COUNT; ++output)
+    {
+        m_pwmOutputLimits[output] = {
+            FC_PWM_LIMIT_DEFAULT_MIN_US,
+            FC_PWM_LIMIT_DEFAULT_CENTER_US,
+            FC_PWM_LIMIT_DEFAULT_MAX_US,
+        };
+        m_pwmOutputWifiValues[output] = FC_PWM_LIMIT_DEFAULT_CENTER_US;
+    }
     for (uint8_t i = 0; i < FC_ORIENTATION_VALUE_COUNT; ++i)
     {
         m_orientation[i] = (i % 4) == 0 ? 1.0f : 0.0f;
     }
     m_mixerCount = 0;
+    m_pwmOutputWifiEnabled = false;
     for (uint8_t mode = 0; mode < FLIGHT_CONTROL_MODE_COUNT; ++mode)
     {
         m_modeEnabled[mode] = mode == FLIGHT_CONTROL_MODE_RATE;
@@ -155,6 +165,22 @@ void FlightControlConfig::Load()
         }
     }
 
+    JsonArray pwmOutputLimits = doc["pwm_output_limits"].as<JsonArray>();
+    for (uint8_t output = 0; output < min(pwmOutputLimits.size(), (size_t)FC_PWM_OUTPUT_MAX_COUNT); ++output)
+    {
+        JsonArray limits = pwmOutputLimits[output].as<JsonArray>();
+        if (limits.size() >= 3)
+        {
+            SetPwmOutputLimits(output,
+                limits[0].as<uint16_t>(),
+                limits[1].as<uint16_t>(),
+                limits[2].as<uint16_t>());
+        }
+    }
+    for (uint8_t output = 0; output < FC_PWM_OUTPUT_MAX_COUNT; ++output)
+    {
+        m_pwmOutputWifiValues[output] = m_pwmOutputLimits[output].centerUs;
+    }
     m_modified = false;
 }
 
@@ -188,7 +214,14 @@ bool FlightControlConfig::Commit()
     armRange.add(m_armRange.endUs);
     copyArray(m_mixer, m_mixerCount, doc["mixer"].to<JsonArray>());
     copyArray(m_orientation, doc["orientation"].to<JsonArray>());
-
+    JsonArray pwmOutputLimits = doc["pwm_output_limits"].to<JsonArray>();
+    for (uint8_t output = 0; output < FC_PWM_OUTPUT_MAX_COUNT; ++output)
+    {
+        JsonArray limits = pwmOutputLimits.add<JsonArray>();
+        limits.add(m_pwmOutputLimits[output].minUs);
+        limits.add(m_pwmOutputLimits[output].centerUs);
+        limits.add(m_pwmOutputLimits[output].maxUs);
+    }
     File file = SPIFFS.open(FC_CONFIG_TEMP_FILE, "w");
     if (!file)
     {
@@ -325,6 +358,39 @@ void FlightControlConfig::SetOrientation(const float *values, uint8_t count)
         memcpy(m_orientation, values, sizeof(m_orientation));
         m_modified = true;
     }
+}
+
+void FlightControlConfig::SetPwmOutputLimits(uint8_t output, uint16_t minUs, uint16_t centerUs, uint16_t maxUs)
+{
+    if (output >= FC_PWM_OUTPUT_MAX_COUNT ||
+        minUs < FC_PWM_LIMIT_MIN_US || maxUs > FC_PWM_LIMIT_MAX_US ||
+        minUs >= centerUs || centerUs >= maxUs)
+    {
+        return;
+    }
+
+    const FlightControlPwmOutputLimits limits = {minUs, centerUs, maxUs};
+    if (memcmp(&m_pwmOutputLimits[output], &limits, sizeof(limits)) != 0)
+    {
+        m_pwmOutputLimits[output] = limits;
+        m_pwmOutputWifiValues[output] = constrain(m_pwmOutputWifiValues[output], minUs, maxUs);
+        m_modified = true;
+    }
+}
+
+void FlightControlConfig::SetPwmOutputWifiEnabled(bool enabled)
+{
+    m_pwmOutputWifiEnabled = enabled;
+}
+
+void FlightControlConfig::SetPwmOutputWifiValue(uint8_t output, uint16_t valueUs)
+{
+    if (output >= FC_PWM_OUTPUT_MAX_COUNT)
+    {
+        return;
+    }
+    const FlightControlPwmOutputLimits &limits = m_pwmOutputLimits[output];
+    m_pwmOutputWifiValues[output] = constrain(valueUs, limits.minUs, limits.maxUs);
 }
 
 #endif

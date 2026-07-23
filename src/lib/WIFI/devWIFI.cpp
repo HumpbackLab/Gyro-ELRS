@@ -525,6 +525,18 @@ static void GetConfiguration(AsyncWebServerRequest *request)
     FlightControlFloatArrayToJson(configJson, "fc_mixer", flightControlConfig.GetMixer(), flightControlConfig.GetMixerCount());
     configJson["fc_mixer_count"] = flightControlConfig.GetMixerCount();
     FlightControlFloatArrayToJson(configJson, "fc_orientation", flightControlConfig.GetOrientation(), FC_ORIENTATION_VALUE_COUNT);
+    configJson["fc_pwm_output_wifi_enabled"] = flightControlConfig.GetPwmOutputWifiEnabled();
+    #if defined(GPIO_PIN_PWM_OUTPUTS)
+    for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
+    {
+      const FlightControlPwmOutputLimits &limits = flightControlConfig.GetPwmOutputLimits(ch);
+      JsonArray outputLimits = configJson["fc_pwm_output_limits"][ch].to<JsonArray>();
+      outputLimits.add(limits.minUs);
+      outputLimits.add(limits.centerUs);
+      outputLimits.add(limits.maxUs);
+      configJson["fc_pwm_output_wifi_values"][ch] = flightControlConfig.GetPwmOutputWifiValue(ch);
+    }
+    #endif
     #endif
     #if defined(GPIO_PIN_PWM_OUTPUTS)
     for (int ch=0; ch<GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
@@ -775,12 +787,42 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
   }
   JsonFlightControlMixerToConfig(json);
   JsonFlightControlOrientationToConfig(json);
+  if (json.containsKey("fc_pwm_output_wifi_enabled"))
+  {
+    flightControlConfig.SetPwmOutputWifiEnabled(json["fc_pwm_output_wifi_enabled"] | false);
+  }
+  JsonArray pwmOutputLimits = json["fc_pwm_output_limits"].as<JsonArray>();
+  for (uint8_t output = 0; output < min(pwmOutputLimits.size(), (size_t)FC_PWM_OUTPUT_MAX_COUNT); ++output)
+  {
+    JsonArray limits = pwmOutputLimits[output].as<JsonArray>();
+    if (limits.size() >= 3)
+    {
+      flightControlConfig.SetPwmOutputLimits(output,
+        limits[0].as<uint16_t>(), limits[1].as<uint16_t>(), limits[2].as<uint16_t>());
+    }
+  }
   flightControlConfig.Commit();
   #endif
 
   config.Commit();
   request->send(200, "text/plain", "Configuration updated");
 }
+
+#if defined(HAS_BASIC_FLIGHT_CONTROL)
+static void UpdatePwmOutputRuntime(AsyncWebServerRequest *request, JsonVariant &json)
+{
+  if (json.containsKey("enabled"))
+  {
+    flightControlConfig.SetPwmOutputWifiEnabled(json["enabled"] | false);
+  }
+  JsonArray values = json["values"].as<JsonArray>();
+  for (uint8_t output = 0; output < min(values.size(), (size_t)FC_PWM_OUTPUT_MAX_COUNT); ++output)
+  {
+    flightControlConfig.SetPwmOutputWifiValue(output, values[output].as<uint16_t>());
+  }
+  request->send(200, "text/plain", "PWM runtime output updated");
+}
+#endif
 #endif
 
 static void WebUpdateGetTarget(AsyncWebServerRequest *request)
@@ -1324,6 +1366,9 @@ static void startServices()
   server.on("/status.json", HTTP_GET, GetRuntimeStatus);
   server.on("/config", HTTP_OPTIONS, corsPreflightResponse);
   server.on("/status.json", HTTP_OPTIONS, corsPreflightResponse);
+  #if defined(TARGET_RX) && defined(HAS_BASIC_FLIGHT_CONTROL)
+  server.on("/pwm-output", HTTP_OPTIONS, corsPreflightResponse);
+  #endif
   server.on("/access", WebUpdateAccessPoint);
   server.on("/target", WebUpdateGetTarget);
   server.on("/firmware.bin", WebUpdateGetFirmware);
@@ -1361,6 +1406,9 @@ static void startServices()
 
   server.addHandler(new AsyncCallbackJsonWebHandler("/config", UpdateConfiguration));
   server.addHandler(new AsyncCallbackJsonWebHandler("/options.json", UpdateSettings));
+  #if defined(TARGET_RX) && defined(HAS_BASIC_FLIGHT_CONTROL)
+  server.addHandler(new AsyncCallbackJsonWebHandler("/pwm-output", UpdatePwmOutputRuntime));
+  #endif
   #if defined(TARGET_TX)
     server.addHandler(new AsyncCallbackJsonWebHandler("/buttons", WebUpdateButtonColors));
     server.addHandler(new AsyncCallbackJsonWebHandler("/import", ImportConfiguration, 32768U));

@@ -11,12 +11,18 @@ constexpr uint8_t FC_MIXER_COLUMNS = 4;
 constexpr uint8_t FC_MIXER_MAX_MOTORS = 8;
 constexpr uint8_t FC_MIXER_VALUE_COUNT = FC_MIXER_COLUMNS * FC_MIXER_MAX_MOTORS;
 constexpr uint8_t FC_ORIENTATION_VALUE_COUNT = 9;
+constexpr uint8_t FC_PWM_OUTPUT_MAX_COUNT = 16;
 constexpr uint8_t FC_MODE_CHANNEL_MIN = 4; // CH5, zero-based
 constexpr uint8_t FC_MODE_CHANNEL_MAX = 15; // CH16, zero-based
 constexpr uint8_t FC_MODE_CHANNEL_DEFAULT = 5; // CH6, zero-based
 constexpr uint8_t FC_ARM_CHANNEL_DEFAULT = 4; // CH5, zero-based
 constexpr uint16_t FC_CHANNEL_RANGE_MIN_US = 900;
 constexpr uint16_t FC_CHANNEL_RANGE_MAX_US = 2100;
+constexpr uint16_t FC_PWM_LIMIT_MIN_US = 500;
+constexpr uint16_t FC_PWM_LIMIT_MAX_US = 2500;
+constexpr uint16_t FC_PWM_LIMIT_DEFAULT_MIN_US = 1000;
+constexpr uint16_t FC_PWM_LIMIT_DEFAULT_CENTER_US = 1500;
+constexpr uint16_t FC_PWM_LIMIT_DEFAULT_MAX_US = 2000;
 
 enum FlightControlMode : uint8_t
 {
@@ -30,6 +36,13 @@ struct FlightControlChannelRange
 {
     uint16_t startUs;
     uint16_t endUs;
+};
+
+struct FlightControlPwmOutputLimits
+{
+    uint16_t minUs;
+    uint16_t centerUs;
+    uint16_t maxUs;
 };
 
 inline bool FlightControlRangeIsActive(const FlightControlChannelRange &range, uint16_t channelUs)
@@ -55,6 +68,9 @@ public:
     const float *GetMixer() const { return m_mixer; }
     uint8_t GetMixerCount() const { return m_mixerCount; }
     const float *GetOrientation() const { return m_orientation; }
+    const FlightControlPwmOutputLimits &GetPwmOutputLimits(uint8_t output) const { return m_pwmOutputLimits[output]; }
+    bool GetPwmOutputWifiEnabled() const { return m_pwmOutputWifiEnabled; }
+    uint16_t GetPwmOutputWifiValue(uint8_t output) const { return m_pwmOutputWifiValues[output]; }
     bool IsModified() const { return m_modified; }
 
     void SetRatePid(uint8_t index, int16_t value);
@@ -67,12 +83,18 @@ public:
     void SetArmRange(uint16_t startUs, uint16_t endUs);
     void SetMixer(const float *values, uint8_t count);
     void SetOrientation(const float *values, uint8_t count);
+    void SetPwmOutputLimits(uint8_t output, uint16_t minUs, uint16_t centerUs, uint16_t maxUs);
+    void SetPwmOutputWifiEnabled(bool enabled);
+    void SetPwmOutputWifiValue(uint8_t output, uint16_t valueUs);
 
 private:
     int16_t m_ratePid[FC_PID_TERM_COUNT] = {};
     int16_t m_anglePid[FC_PID_TERM_COUNT] = {};
     float m_mixer[FC_MIXER_VALUE_COUNT] = {};
     float m_orientation[FC_ORIENTATION_VALUE_COUNT] = {};
+    FlightControlPwmOutputLimits m_pwmOutputLimits[FC_PWM_OUTPUT_MAX_COUNT] = {};
+    bool m_pwmOutputWifiEnabled = false;
+    uint16_t m_pwmOutputWifiValues[FC_PWM_OUTPUT_MAX_COUNT] = {};
     uint8_t m_mixerCount = 0;
     bool m_modeEnabled[FLIGHT_CONTROL_MODE_COUNT] = {};
     uint8_t m_modeChannels[FLIGHT_CONTROL_MODE_COUNT] = {};

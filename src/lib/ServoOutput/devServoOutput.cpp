@@ -141,9 +141,54 @@ static void servosFailsafe()
     }
 }
 
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+static uint16_t mapServoOutput(uint8_t ch, uint16_t us)
+{
+    constexpr int32_t INPUT_MIN_US = 988;
+    constexpr int32_t INPUT_CENTER_US = 1500;
+    constexpr int32_t INPUT_MAX_US = 2012;
+    const FlightControlPwmOutputLimits &limits = flightControlConfig.GetPwmOutputLimits(ch);
+    const int32_t input = constrain(us, INPUT_MIN_US, INPUT_MAX_US);
+
+    if (input <= INPUT_CENTER_US)
+    {
+        return limits.minUs +
+            (input - INPUT_MIN_US) * (limits.centerUs - limits.minUs) /
+            (INPUT_CENTER_US - INPUT_MIN_US);
+    }
+    return limits.centerUs +
+        (input - INPUT_CENTER_US) * (limits.maxUs - limits.centerUs) /
+        (INPUT_MAX_US - INPUT_CENTER_US);
+}
+
+static bool usesConfigurablePwmLimits(const rx_config_pwm_t *chConfig)
+{
+    const uint16_t frequency = servoOutputModeToFrequency((eServoOutputMode)chConfig->val.mode);
+    return frequency >= 50U && frequency <= 500U;
+}
+#endif
+
 static void servosUpdate(unsigned long now)
 {
     static uint32_t lastUpdate;
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+    if (connectionState == wifiUpdate)
+    {
+        const bool outputEnabled = flightControlConfig.GetPwmOutputWifiEnabled();
+        for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
+        {
+            const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
+            if (usesConfigurablePwmLimits(chConfig))
+            {
+                const uint16_t us = outputEnabled
+                    ? flightControlConfig.GetPwmOutputWifiValue(ch)
+                    : 0U;
+                servoWrite(ch, us);
+            }
+        }
+        return;
+    }
+#endif
     if (newChannelsAvailable)
     {
         newChannelsAvailable = false;
@@ -163,7 +208,12 @@ static void servosUpdate(unsigned long now)
                 {
                     if (motorOutputEnabled)
                     {
-                        servoWrite(ch, mixerOutput.motorUs[ch]);
+                        uint16_t us = mixerOutput.motorUs[ch];
+                        if (usesConfigurablePwmLimits(chConfig))
+                        {
+                            us = mapServoOutput(ch, us);
+                        }
+                        servoWrite(ch, us);
                     }
                     else
                     {
@@ -192,6 +242,12 @@ static void servosUpdate(unsigned long now)
             {
                 us = 3000U - us;
             }
+            #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+            if (usesConfigurablePwmLimits(chConfig))
+            {
+                us = mapServoOutput(ch, us);
+            }
+            #endif
             servoWrite(ch, us);
         } /* for each servo */
     }     /* if newChannelsAvailable */
