@@ -67,6 +67,10 @@ public:
     const FlightControlChannelRange &GetArmRange() const { return m_armRange; }
     const float *GetMixer() const { return m_mixer; }
     uint8_t GetMixerCount() const { return m_mixerCount; }
+    bool GetMixerOutputServo(uint8_t output) const
+    {
+        return output < FC_MIXER_MAX_MOTORS && m_mixerOutputServo[output];
+    }
     const float *GetOrientation() const { return m_orientation; }
     const FlightControlPwmOutputLimits &GetPwmOutputLimits(uint8_t output) const { return m_pwmOutputLimits[output]; }
     bool GetPwmOutputWifiEnabled() const { return m_pwmOutputWifiEnabled; }
@@ -82,6 +86,7 @@ public:
     void SetArmChannel(uint8_t channel);
     void SetArmRange(uint16_t startUs, uint16_t endUs);
     void SetMixer(const float *values, uint8_t count);
+    void SetMixerOutputServo(uint8_t output, bool isServo);
     void SetOrientation(const float *values, uint8_t count);
     void SetPwmOutputLimits(uint8_t output, uint16_t minUs, uint16_t centerUs, uint16_t maxUs);
     void SetPwmOutputWifiEnabled(bool enabled);
@@ -91,6 +96,7 @@ private:
     int16_t m_ratePid[FC_PID_TERM_COUNT] = {};
     int16_t m_anglePid[FC_PID_TERM_COUNT] = {};
     float m_mixer[FC_MIXER_VALUE_COUNT] = {};
+    bool m_mixerOutputServo[FC_MIXER_MAX_MOTORS] = {};
     float m_orientation[FC_ORIENTATION_VALUE_COUNT] = {};
     FlightControlPwmOutputLimits m_pwmOutputLimits[FC_PWM_OUTPUT_MAX_COUNT] = {};
     bool m_pwmOutputWifiEnabled = false;

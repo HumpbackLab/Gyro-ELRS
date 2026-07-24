@@ -399,6 +399,22 @@ static void JsonFlightControlMixerToConfig(JsonVariant &json)
   flightControlConfig.SetMixer(mixer, count);
 }
 
+static void JsonFlightControlMixerServosToConfig(JsonVariant &json)
+{
+  if (!json.containsKey("fc_mixer_servos"))
+  {
+    return;
+  }
+
+  JsonArray array = json["fc_mixer_servos"].as<JsonArray>();
+  const uint8_t outputCount = flightControlConfig.GetMixerCount() / FC_MIXER_COLUMNS;
+  for (uint8_t output = 0; output < outputCount; ++output)
+  {
+    flightControlConfig.SetMixerOutputServo(output,
+      output < array.size() ? array[output].as<bool>() : false);
+  }
+}
+
 static void JsonFlightControlOrientationToConfig(JsonVariant &json)
 {
   if (!json.containsKey("fc_orientation"))
@@ -524,6 +540,11 @@ static void GetConfiguration(AsyncWebServerRequest *request)
     FlightControlPidToJson(configJson, "fc_angle_pid", flightControlConfig.GetAnglePid());
     FlightControlFloatArrayToJson(configJson, "fc_mixer", flightControlConfig.GetMixer(), flightControlConfig.GetMixerCount());
     configJson["fc_mixer_count"] = flightControlConfig.GetMixerCount();
+    JsonArray mixerServos = configJson["fc_mixer_servos"].to<JsonArray>();
+    for (uint8_t output = 0; output < flightControlConfig.GetMixerCount() / FC_MIXER_COLUMNS; ++output)
+    {
+      mixerServos.add(flightControlConfig.GetMixerOutputServo(output));
+    }
     FlightControlFloatArrayToJson(configJson, "fc_orientation", flightControlConfig.GetOrientation(), FC_ORIENTATION_VALUE_COUNT);
     configJson["fc_pwm_output_wifi_enabled"] = flightControlConfig.GetPwmOutputWifiEnabled();
     #if defined(GPIO_PIN_PWM_OUTPUTS)
@@ -786,6 +807,7 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
     }
   }
   JsonFlightControlMixerToConfig(json);
+  JsonFlightControlMixerServosToConfig(json);
   JsonFlightControlOrientationToConfig(json);
   if (json.containsKey("fc_pwm_output_wifi_enabled"))
   {

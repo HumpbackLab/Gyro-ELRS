@@ -119,18 +119,26 @@ static void servoWrite(uint8_t ch, uint16_t us)
     }
 }
 
-static void servosFailsafe()
+static uint16_t failsafePositionUs(const rx_config_pwm_t *chConfig)
 {
     constexpr unsigned SERVO_FAILSAFE_MIN = 988U;
+    uint16_t us = chConfig->val.failsafe + SERVO_FAILSAFE_MIN;
+    if (chConfig->val.inverted)
+    {
+        us = 3000U - us;
+    }
+    return us;
+}
+
+static void servosFailsafe()
+{
     for (int ch = 0 ; ch < GPIO_PIN_PWM_OUTPUTS_COUNT ; ++ch)
     {
         const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
         if (chConfig->val.failsafeMode == PWMFAILSAFE_SET_POSITION) {
-            // Note: Failsafe values do not respect the inverted flag, failsafe values are absolute
-            uint16_t us = chConfig->val.failsafe + SERVO_FAILSAFE_MIN;
             // Always write the failsafe position even if the servo has never been started,
             // so all the servos go to their expected position
-            servoWrite(ch, us);
+            servoWrite(ch, failsafePositionUs(chConfig));
         }
         else if (chConfig->val.failsafeMode == PWMFAILSAFE_NO_PULSES) {
             servoWrite(ch, 0);
@@ -161,6 +169,22 @@ static uint16_t mapServoOutput(uint8_t ch, uint16_t us)
         (INPUT_MAX_US - INPUT_CENTER_US);
 }
 
+static uint16_t invertMappedServoOutput(uint8_t ch, uint16_t us)
+{
+    const FlightControlPwmOutputLimits &limits = flightControlConfig.GetPwmOutputLimits(ch);
+    const int32_t input = constrain(us, limits.minUs, limits.maxUs);
+
+    if (input <= limits.centerUs)
+    {
+        return limits.maxUs -
+            (input - limits.minUs) * (limits.maxUs - limits.centerUs) /
+            (limits.centerUs - limits.minUs);
+    }
+    return limits.centerUs -
+        (input - limits.centerUs) * (limits.centerUs - limits.minUs) /
+        (limits.maxUs - limits.centerUs);
+}
+
 static bool usesConfigurablePwmLimits(const rx_config_pwm_t *chConfig)
 {
     const uint16_t frequency = servoOutputModeToFrequency((eServoOutputMode)chConfig->val.mode);
@@ -180,9 +204,13 @@ static void servosUpdate(unsigned long now)
             const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
             if (usesConfigurablePwmLimits(chConfig))
             {
-                const uint16_t us = outputEnabled
+                uint16_t us = outputEnabled
                     ? flightControlConfig.GetPwmOutputWifiValue(ch)
                     : 0U;
+                if (outputEnabled && chConfig->val.inverted)
+                {
+                    us = invertMappedServoOutput(ch, us);
+                }
                 servoWrite(ch, us);
             }
         }
@@ -206,9 +234,14 @@ static void servosUpdate(unsigned long now)
             {
                 if (ch < mixerOutput.motorCount)
                 {
-                    if (motorOutputEnabled)
+                    const bool isServo = flightControlConfig.GetMixerOutputServo(ch);
+                    if (motorOutputEnabled || isServo)
                     {
                         uint16_t us = mixerOutput.motorUs[ch];
+                        if (chConfig->val.inverted)
+                        {
+                            us = 3000U - us;
+                        }
                         if (usesConfigurablePwmLimits(chConfig))
                         {
                             us = mapServoOutput(ch, us);
@@ -217,9 +250,8 @@ static void servosUpdate(unsigned long now)
                     }
                     else
                     {
-                        constexpr unsigned SERVO_FAILSAFE_MIN = 988U;
                         if (chConfig->val.failsafeMode == PWMFAILSAFE_SET_POSITION) {
-                            servoWrite(ch, chConfig->val.failsafe + SERVO_FAILSAFE_MIN);
+                            servoWrite(ch, failsafePositionUs(chConfig));
                         }
                         else if (chConfig->val.failsafeMode == PWMFAILSAFE_NO_PULSES) {
                             servoWrite(ch, 0);

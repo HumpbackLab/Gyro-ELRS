@@ -19,6 +19,7 @@ void FlightControlConfig::SetDefaults()
     memset(m_ratePid, 0, sizeof(m_ratePid));
     memset(m_anglePid, 0, sizeof(m_anglePid));
     memset(m_mixer, 0, sizeof(m_mixer));
+    memset(m_mixerOutputServo, 0, sizeof(m_mixerOutputServo));
     memset(m_orientation, 0, sizeof(m_orientation));
     for (uint8_t output = 0; output < FC_PWM_OUTPUT_MAX_COUNT; ++output)
     {
@@ -155,6 +156,12 @@ void FlightControlConfig::Load()
     {
         m_mixer[i] = mixer[i].as<float>();
     }
+    JsonArray mixerServos = doc["mixer_servos"].as<JsonArray>();
+    const uint8_t mixerOutputCount = m_mixerCount / FC_MIXER_COLUMNS;
+    for (uint8_t output = 0; output < min(mixerServos.size(), (size_t)mixerOutputCount); ++output)
+    {
+        m_mixerOutputServo[output] = mixerServos[output].as<bool>();
+    }
 
     JsonArray orientation = doc["orientation"].as<JsonArray>();
     if (orientation.size() >= FC_ORIENTATION_VALUE_COUNT)
@@ -213,6 +220,11 @@ bool FlightControlConfig::Commit()
     armRange.add(m_armRange.startUs);
     armRange.add(m_armRange.endUs);
     copyArray(m_mixer, m_mixerCount, doc["mixer"].to<JsonArray>());
+    JsonArray mixerServos = doc["mixer_servos"].to<JsonArray>();
+    for (uint8_t output = 0; output < m_mixerCount / FC_MIXER_COLUMNS; ++output)
+    {
+        mixerServos.add(m_mixerOutputServo[output]);
+    }
     copyArray(m_orientation, doc["orientation"].to<JsonArray>());
     JsonArray pwmOutputLimits = doc["pwm_output_limits"].to<JsonArray>();
     for (uint8_t output = 0; output < FC_PWM_OUTPUT_MAX_COUNT; ++output)
@@ -347,6 +359,15 @@ void FlightControlConfig::SetMixer(const float *values, uint8_t count)
         memcpy(m_mixer, values, clippedCount * sizeof(float));
         memset(m_mixer + clippedCount, 0, (FC_MIXER_VALUE_COUNT - clippedCount) * sizeof(float));
         m_mixerCount = clippedCount;
+        m_modified = true;
+    }
+}
+
+void FlightControlConfig::SetMixerOutputServo(uint8_t output, bool isServo)
+{
+    if (output < FC_MIXER_MAX_MOTORS && m_mixerOutputServo[output] != isServo)
+    {
+        m_mixerOutputServo[output] = isServo;
         m_modified = true;
     }
 }

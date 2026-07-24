@@ -179,8 +179,10 @@ FlightControlMixerOutput FlightControlMixer::mix(float throttle, float roll, flo
             roll * _mix[offset + 1] +
             pitch * _mix[offset + 2] +
             yaw * _mix[offset + 3];
-        // PWM output is absolute pulse width: base 1000us plus scaled mixer offset.
-        output.motorUs[i] = (uint16_t)constrain(1000.0f + motor, 1000.0f, 2000.0f);
+        // Motors start at minimum throttle. Servos use a centered neutral so
+        // zero mixer input returns them to their configured center position.
+        const float baseUs = flightControlConfig.GetMixerOutputServo(i) ? 1500.0f : 1000.0f;
+        output.motorUs[i] = (uint16_t)constrain(baseUs + motor, 1000.0f, 2000.0f);
     }
     return output;
 }
