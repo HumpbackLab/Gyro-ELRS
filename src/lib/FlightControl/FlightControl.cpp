@@ -19,6 +19,7 @@ static constexpr float FC_STANDARD_GRAVITY = 9.80665f;
 static constexpr uint8_t FC_PID_COLUMNS = 4;
 static constexpr uint8_t FC_PID_AXES = 3;
 static constexpr float FC_MANUAL_CONTROL_RANGE = 500.0f;
+static constexpr float FC_TWO_PI = 6.28318530718f;
 // fc.json stores PID values in centi-units for LUA/CRSF int16 transport;
 // restore them to the same floating-point units shown in the WebUI.
 static constexpr float FC_PID_CONFIG_SCALE = 0.01f;
@@ -120,19 +121,21 @@ void FlightControlEstimator::update(const FlightControlImuSample &sample, float 
     }
 }
 
-void FlightControlPid::set(float kp, float ki, float kd, float integratorLimit)
+void FlightControlPid::set(float kp, float ki, float kd, float integratorLimit, float dtermLpfHz)
 {
     _kp = kp;
     _ki = ki;
     _kd = kd;
     _integratorLimit = integratorLimit;
+    _dtermLpfHz = dtermLpfHz;
 }
 
 void FlightControlPid::reset()
 {
     _integrator = 0.0f;
-    _lastError = 0.0f;
-    _hasLastError = false;
+    _lastMeasurement = 0.0f;
+    _filteredDerivative = 0.0f;
+    _hasLastMeasurement = false;
 }
 
 float FlightControlPid::update(float target, float measurement, float dt)
@@ -142,12 +145,26 @@ float FlightControlPid::update(float target, float measurement, float dt)
     _integrator = constrain(_integrator, -_integratorLimit, _integratorLimit);
 
     float derivative = 0.0f;
-    if (_hasLastError && dt > 0.0f)
+    if (_hasLastMeasurement && dt > 0.0f)
     {
-        derivative = (error - _lastError) / dt;
+        // Derivative on measurement avoids a D kick when the stick/setpoint
+        // changes. Low-pass the derivative before applying Kd, as INAV does.
+        const float rawDerivative = -((measurement - _lastMeasurement) / dt);
+        if (_dtermLpfHz > 0.0f)
+        {
+            const float rc = 1.0f / (FC_TWO_PI * _dtermLpfHz);
+            const float alpha = dt / (rc + dt);
+            _filteredDerivative += alpha * (rawDerivative - _filteredDerivative);
+            derivative = _filteredDerivative;
+        }
+        else
+        {
+            _filteredDerivative = rawDerivative;
+            derivative = rawDerivative;
+        }
     }
-    _lastError = error;
-    _hasLastError = true;
+    _lastMeasurement = measurement;
+    _hasLastMeasurement = true;
 
     return _kp * error + _ki * _integrator + _kd * derivative;
 }
@@ -242,6 +259,9 @@ void FlightControlRuntime::reset()
     _lastUpdateDtUs = 0;
     _lastSampleAgeMs = 0;
     _lastUpdateUs = 0;
+    _filteredGyroDps = {};
+    _gyroFilterInitialized = false;
+    _gyroFilterHz = 0;
 }
 
 void FlightControlRuntime::resetPidState()
@@ -252,6 +272,39 @@ void FlightControlRuntime::resetPidState()
     _rollAnglePid.reset();
     _pitchAnglePid.reset();
     _yawAnglePid.reset();
+}
+
+void FlightControlRuntime::filterGyro(FlightControlImuSample &sample, float dt)
+{
+    if (!sample.gyroValid)
+    {
+        return;
+    }
+
+    const uint8_t cutoffHz = flightControlConfig.GetGyroLpfHz();
+    if (cutoffHz == 0 || dt <= 0.0f)
+    {
+        _filteredGyroDps = sample.gyroDps;
+        _gyroFilterInitialized = false;
+        _gyroFilterHz = cutoffHz;
+        return;
+    }
+
+    if (!_gyroFilterInitialized || _gyroFilterHz != cutoffHz)
+    {
+        _filteredGyroDps = sample.gyroDps;
+        _gyroFilterInitialized = true;
+        _gyroFilterHz = cutoffHz;
+    }
+    else
+    {
+        const float rc = 1.0f / (FC_TWO_PI * cutoffHz);
+        const float alpha = dt / (rc + dt);
+        _filteredGyroDps.x += alpha * (sample.gyroDps.x - _filteredGyroDps.x);
+        _filteredGyroDps.y += alpha * (sample.gyroDps.y - _filteredGyroDps.y);
+        _filteredGyroDps.z += alpha * (sample.gyroDps.z - _filteredGyroDps.z);
+    }
+    sample.gyroDps = _filteredGyroDps;
 }
 
 bool FlightControlRuntime::refreshReadyState()
@@ -280,9 +333,10 @@ bool FlightControlRuntime::loadPidBank(FlightControlPid &rollPid, FlightControlP
     }
 
     // Convert centi-unit config values back to WebUI units before PID math.
-    rollPid.set(pid[0] * FC_PID_CONFIG_SCALE, pid[1] * FC_PID_CONFIG_SCALE, pid[2] * FC_PID_CONFIG_SCALE, pid[3] * FC_PID_CONFIG_SCALE);
-    pitchPid.set(pid[4] * FC_PID_CONFIG_SCALE, pid[5] * FC_PID_CONFIG_SCALE, pid[6] * FC_PID_CONFIG_SCALE, pid[7] * FC_PID_CONFIG_SCALE);
-    yawPid.set(pid[8] * FC_PID_CONFIG_SCALE, pid[9] * FC_PID_CONFIG_SCALE, pid[10] * FC_PID_CONFIG_SCALE, pid[11] * FC_PID_CONFIG_SCALE);
+    const float dtermLpfHz = flightControlConfig.GetDtermLpfHz();
+    rollPid.set(pid[0] * FC_PID_CONFIG_SCALE, pid[1] * FC_PID_CONFIG_SCALE, pid[2] * FC_PID_CONFIG_SCALE, pid[3] * FC_PID_CONFIG_SCALE, dtermLpfHz);
+    pitchPid.set(pid[4] * FC_PID_CONFIG_SCALE, pid[5] * FC_PID_CONFIG_SCALE, pid[6] * FC_PID_CONFIG_SCALE, pid[7] * FC_PID_CONFIG_SCALE, dtermLpfHz);
+    yawPid.set(pid[8] * FC_PID_CONFIG_SCALE, pid[9] * FC_PID_CONFIG_SCALE, pid[10] * FC_PID_CONFIG_SCALE, pid[11] * FC_PID_CONFIG_SCALE, dtermLpfHz);
     return true;
 }
 
@@ -317,6 +371,7 @@ void FlightControlRuntime::updateAttitudeOnly(uint32_t nowUs)
     }
 
     _orientation.apply(sample);
+    filterGyro(sample, dt);
     _lastImuSample = sample;
     _lastDebugUpdateMs = millis();
     _lastSampleAgeMs = sample.timestampMs == 0 ? 0 : (uint16_t)constrain((uint32_t)(_lastDebugUpdateMs - sample.timestampMs), 0U, 65535U);
@@ -382,6 +437,7 @@ void FlightControlRuntime::update(uint32_t nowUs)
         return;
     }
     _orientation.apply(sample);
+    filterGyro(sample, dt);
     _lastImuSample = sample;
     _lastDebugUpdateMs = millis();
     _lastSampleAgeMs = sample.timestampMs == 0 ? 0 : (uint16_t)constrain((uint32_t)(_lastDebugUpdateMs - sample.timestampMs), 0U, 65535U);

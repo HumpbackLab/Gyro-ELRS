@@ -538,6 +538,8 @@ static void GetConfiguration(AsyncWebServerRequest *request)
     FlightControlRangeToJson(configJson["fc_arm_range"].to<JsonArray>(), flightControlConfig.GetArmRange());
     FlightControlPidToJson(configJson, "fc_rate_pid", flightControlConfig.GetRatePid());
     FlightControlPidToJson(configJson, "fc_angle_pid", flightControlConfig.GetAnglePid());
+    configJson["fc_dterm_lpf_hz"] = flightControlConfig.GetDtermLpfHz();
+    configJson["fc_gyro_lpf_hz"] = flightControlConfig.GetGyroLpfHz();
     FlightControlFloatArrayToJson(configJson, "fc_mixer", flightControlConfig.GetMixer(), flightControlConfig.GetMixerCount());
     configJson["fc_mixer_count"] = flightControlConfig.GetMixerCount();
     JsonArray mixerServos = configJson["fc_mixer_servos"].to<JsonArray>();
@@ -770,6 +772,14 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
   JsonPidToConfig(json, "fc_angle_pid", [](uint8_t index, int16_t value) {
     flightControlConfig.SetAnglePid(index, value);
   });
+  if (json.containsKey("fc_dterm_lpf_hz"))
+  {
+    flightControlConfig.SetDtermLpfHz(json["fc_dterm_lpf_hz"].as<int>());
+  }
+  if (json.containsKey("fc_gyro_lpf_hz"))
+  {
+    flightControlConfig.SetGyroLpfHz(json["fc_gyro_lpf_hz"].as<int>());
+  }
   if (json.containsKey("fc_mode_conditions"))
   {
     JsonObject conditions = json["fc_mode_conditions"].as<JsonObject>();

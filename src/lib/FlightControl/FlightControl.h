@@ -26,7 +26,7 @@ private:
 
 class FlightControlPid {
 public:
-    void set(float kp, float ki, float kd, float integratorLimit);
+    void set(float kp, float ki, float kd, float integratorLimit, float dtermLpfHz);
     void reset();
     float update(float target, float measurement, float dt);
 
@@ -35,9 +35,11 @@ private:
     float _ki = 0.0f;
     float _kd = 0.0f;
     float _integratorLimit = 0.0f;
+    float _dtermLpfHz = 0.0f;
     float _integrator = 0.0f;
-    float _lastError = 0.0f;
-    bool _hasLastError = false;
+    float _lastMeasurement = 0.0f;
+    float _filteredDerivative = 0.0f;
+    bool _hasLastMeasurement = false;
 };
 
 class FlightControlMixer {
@@ -85,6 +87,7 @@ private:
     void loadStickTargets(float &throttle, float &rollAngle, float &pitchAngle, float &yawRate);
     FlightControlMode readModeSwitch() const;
     void resetPidState();
+    void filterGyro(FlightControlImuSample &sample, float dt);
 
     FlightControlSensorBackend _sensors;
     FlightControlEstimator _estimator;
@@ -98,6 +101,7 @@ private:
     FlightControlOrientation _orientation;
     FlightControlMixerOutput _mixerOutput = {};
     FlightControlImuSample _lastImuSample = {};
+    FlightControlVector3 _filteredGyroDps = {};
     uint32_t _lastDebugUpdateMs = 0;
     uint16_t _lastUpdateDtUs = 0;
     uint16_t _lastSampleAgeMs = 0;
@@ -105,6 +109,8 @@ private:
     bool _sensorsReady = false;
     bool _mixerReady = false;
     bool _pidReady = false;
+    bool _gyroFilterInitialized = false;
+    uint8_t _gyroFilterHz = 0;
     FlightControlMode _mode = FLIGHT_CONTROL_MODE_MANUAL;
 };
 

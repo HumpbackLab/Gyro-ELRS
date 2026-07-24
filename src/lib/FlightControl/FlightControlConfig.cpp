@@ -18,6 +18,8 @@ void FlightControlConfig::SetDefaults()
 {
     memset(m_ratePid, 0, sizeof(m_ratePid));
     memset(m_anglePid, 0, sizeof(m_anglePid));
+    m_dtermLpfHz = FC_DTERM_LPF_DEFAULT_HZ;
+    m_gyroLpfHz = FC_GYRO_LPF_DEFAULT_HZ;
     memset(m_mixer, 0, sizeof(m_mixer));
     memset(m_mixerOutputServo, 0, sizeof(m_mixerOutputServo));
     memset(m_orientation, 0, sizeof(m_orientation));
@@ -80,6 +82,8 @@ void FlightControlConfig::Load()
     {
         m_anglePid[i] = anglePid[i].as<int16_t>();
     }
+    SetDtermLpfHz(doc["dterm_lpf_hz"] | FC_DTERM_LPF_DEFAULT_HZ);
+    SetGyroLpfHz(doc["gyro_lpf_hz"] | FC_GYRO_LPF_DEFAULT_HZ);
 
     JsonVariant modeConditionsValue = doc["mode_conditions"];
     if (modeConditionsValue.is<JsonObject>())
@@ -201,6 +205,8 @@ bool FlightControlConfig::Commit()
     JsonDocument doc;
     copyArray(m_ratePid, doc["rate_pid"].to<JsonArray>());
     copyArray(m_anglePid, doc["angle_pid"].to<JsonArray>());
+    doc["dterm_lpf_hz"] = m_dtermLpfHz;
+    doc["gyro_lpf_hz"] = m_gyroLpfHz;
     JsonObject modeConditions = doc["mode_conditions"].to<JsonObject>();
     const char *keys[] = {nullptr, "rate", "angle"};
     for (uint8_t mode = FLIGHT_CONTROL_MODE_RATE; mode < FLIGHT_CONTROL_MODE_COUNT; ++mode)
@@ -270,6 +276,30 @@ void FlightControlConfig::SetAnglePid(uint8_t index, int16_t value)
     if (index < FC_PID_TERM_COUNT && m_anglePid[index] != value)
     {
         m_anglePid[index] = value;
+        m_modified = true;
+    }
+}
+
+void FlightControlConfig::SetDtermLpfHz(int frequencyHz)
+{
+    const uint8_t clippedFrequency = frequencyHz <= 0
+        ? 0
+        : (uint8_t)constrain(frequencyHz, (int)FC_DTERM_LPF_MIN_HZ, (int)FC_DTERM_LPF_MAX_HZ);
+    if (m_dtermLpfHz != clippedFrequency)
+    {
+        m_dtermLpfHz = clippedFrequency;
+        m_modified = true;
+    }
+}
+
+void FlightControlConfig::SetGyroLpfHz(int frequencyHz)
+{
+    const uint8_t clippedFrequency = frequencyHz <= 0
+        ? 0
+        : (uint8_t)constrain(frequencyHz, (int)FC_GYRO_LPF_MIN_HZ, (int)FC_GYRO_LPF_MAX_HZ);
+    if (m_gyroLpfHz != clippedFrequency)
+    {
+        m_gyroLpfHz = clippedFrequency;
         m_modified = true;
     }
 }

@@ -23,6 +23,12 @@ constexpr uint16_t FC_PWM_LIMIT_MAX_US = 2500;
 constexpr uint16_t FC_PWM_LIMIT_DEFAULT_MIN_US = 1000;
 constexpr uint16_t FC_PWM_LIMIT_DEFAULT_CENTER_US = 1500;
 constexpr uint16_t FC_PWM_LIMIT_DEFAULT_MAX_US = 2000;
+constexpr uint8_t FC_DTERM_LPF_MIN_HZ = 5;
+constexpr uint8_t FC_DTERM_LPF_MAX_HZ = 100;
+constexpr uint8_t FC_DTERM_LPF_DEFAULT_HZ = 20;
+constexpr uint8_t FC_GYRO_LPF_MIN_HZ = 5;
+constexpr uint8_t FC_GYRO_LPF_MAX_HZ = 100;
+constexpr uint8_t FC_GYRO_LPF_DEFAULT_HZ = 30;
 
 enum FlightControlMode : uint8_t
 {
@@ -59,6 +65,8 @@ public:
 
     const int16_t *GetRatePid() const { return m_ratePid; }
     const int16_t *GetAnglePid() const { return m_anglePid; }
+    uint8_t GetDtermLpfHz() const { return m_dtermLpfHz; }
+    uint8_t GetGyroLpfHz() const { return m_gyroLpfHz; }
     bool GetModeEnabled(FlightControlMode mode) const { return mode != FLIGHT_CONTROL_MODE_MANUAL && m_modeEnabled[mode]; }
     uint8_t GetModeChannel(FlightControlMode mode) const { return m_modeChannels[mode]; }
     const FlightControlChannelRange &GetModeRange(FlightControlMode mode) const { return m_modeRanges[mode]; }
@@ -79,6 +87,8 @@ public:
 
     void SetRatePid(uint8_t index, int16_t value);
     void SetAnglePid(uint8_t index, int16_t value);
+    void SetDtermLpfHz(int frequencyHz);
+    void SetGyroLpfHz(int frequencyHz);
     void SetModeEnabled(FlightControlMode mode, bool enabled);
     void SetModeChannel(FlightControlMode mode, uint8_t channel);
     void SetModeRange(FlightControlMode mode, uint16_t startUs, uint16_t endUs);
@@ -95,6 +105,8 @@ public:
 private:
     int16_t m_ratePid[FC_PID_TERM_COUNT] = {};
     int16_t m_anglePid[FC_PID_TERM_COUNT] = {};
+    uint8_t m_dtermLpfHz = FC_DTERM_LPF_DEFAULT_HZ;
+    uint8_t m_gyroLpfHz = FC_GYRO_LPF_DEFAULT_HZ;
     float m_mixer[FC_MIXER_VALUE_COUNT] = {};
     bool m_mixerOutputServo[FC_MIXER_MAX_MOTORS] = {};
     float m_orientation[FC_ORIENTATION_VALUE_COUNT] = {};
