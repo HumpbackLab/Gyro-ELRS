@@ -467,11 +467,6 @@ static int timeout()
                 return flashLED(blinkyColor, 192, 0, LEDSEQ_MODEL_MISMATCH, sizeof(LEDSEQ_MODEL_MISMATCH));
             }
             #if defined(HAS_BASIC_FLIGHT_CONTROL)
-            if (isFlightControlWifiSwitchOnly())
-            {
-                hueFadeLED(blinkyColor, 85, 85-30, 128, 2);
-                return DURATION_IMMEDIATELY;
-            }
             if (isFlightControlWifiCoexist())
             {
                 blinkyColor.h = 128; // Cyan distinguishes coexistence from RF and WiFi-update states.

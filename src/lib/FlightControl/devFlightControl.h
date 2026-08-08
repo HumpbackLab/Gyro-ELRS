@@ -60,7 +60,6 @@ struct FlightControlDebugSnapshot {
 const FlightControlAttitude &flightControlGetAttitude();
 const FlightControlMixerOutput &flightControlGetMixerOutput();
 bool flightControlGetDebugSnapshot(FlightControlDebugSnapshot &snapshot);
-bool flightControlWifiSwitchOnlyActive();
 
 #else
 #endif

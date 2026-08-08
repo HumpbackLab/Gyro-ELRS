@@ -204,11 +204,6 @@ static int event()
         #endif
         #if defined(TARGET_RX)
             #if defined(HAS_BASIC_FLIGHT_CONTROL)
-            if (isFlightControlWifiSwitchOnly() && GPIO_PIN_LED != UNDEF_PIN)
-            {
-                return flashLED(GPIO_PIN_LED, GPIO_LED_RED_INVERTED,
-                    LEDSEQ_WIFI_UPDATE, sizeof(LEDSEQ_WIFI_UPDATE));
-            }
             if (isFlightControlWifiCoexist() && GPIO_PIN_LED != UNDEF_PIN)
             {
                 return flashLED(GPIO_PIN_LED, GPIO_LED_RED_INVERTED,

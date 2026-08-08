@@ -85,7 +85,6 @@ static char station_password[65];
 
 static bool wifiStarted = false;
 static bool flightControlWifiCoexist = false;
-static bool flightControlWifiSwitchOnly = false;
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX) && defined(PLATFORM_ESP32)
 #include "devFlightControl.h"
 static WiFiUDP flightControlUdp;
@@ -589,7 +588,7 @@ static void GetConfiguration(AsyncWebServerRequest *request)
       condition.add(range.endUs);
     }
     JsonObject wifiConditions = configJson["fc_wifi_conditions"].to<JsonObject>();
-    const char *wifiModeKeys[] = {"rf", "wifi", "coexist"};
+    const char *wifiModeKeys[] = {"rf", "coexist"};
     for (uint8_t mode = 0; mode < FLIGHT_CONTROL_WIFI_MODE_COUNT; ++mode)
     {
       const FlightControlWifiMode wifiMode = (FlightControlWifiMode)mode;
@@ -873,7 +872,7 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
   if (json.containsKey("fc_wifi_conditions"))
   {
     JsonObject conditions = json["fc_wifi_conditions"].as<JsonObject>();
-    const char *wifiModeKeys[] = {"rf", "wifi", "coexist"};
+    const char *wifiModeKeys[] = {"rf", "coexist"};
     for (uint8_t mode = 0; mode < FLIGHT_CONTROL_WIFI_MODE_COUNT; ++mode)
     {
       JsonArray condition = conditions[wifiModeKeys[mode]].as<JsonArray>();
@@ -1373,8 +1372,8 @@ static void startWiFi(unsigned long now)
   WiFi.mode(WIFI_OFF);
   strcpy(station_ssid, firmwareOptions.home_wifi_ssid);
   strcpy(station_password, firmwareOptions.home_wifi_password);
-  // Both CH7 WiFi positions keep ELRS running. Always expose the RX access
-  // point immediately so the device remains directly discoverable.
+  // Coexistence keeps ELRS running. Expose the RX access point immediately
+  // so the device remains directly discoverable.
   if (flightControlWifiCoexist || station_ssid[0] == 0) {
     changeTime = now;
     changeMode = WIFI_AP;
@@ -1786,18 +1785,16 @@ device_t WIFI_device = {
 };
 
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX) && defined(PLATFORM_ESP32)
-static void setFlightControlWifiState(bool coexist, bool switchOnly)
+static void setFlightControlWifiState(bool coexist)
 {
-  if (flightControlWifiCoexist == coexist && flightControlWifiSwitchOnly == switchOnly) return;
+  if (flightControlWifiCoexist == coexist) return;
   flightControlWifiCoexist = coexist;
-  flightControlWifiSwitchOnly = switchOnly;
   if (coexist) {
     flightControlUdpSequence = 0;
     flightControlUdpLastMs = 0;
   } else {
     flightControlUdp.stop();
-    // Tear the coexistence interface down immediately. If CH7 selected pure
-    // WiFi, the normal WiFi event will then restart it and stop the radio.
+    // Tear the coexistence interface down immediately when returning to RF.
     if (wifiStarted) {
       wifiStarted = false;
       WiFi.disconnect(true);
@@ -1809,22 +1806,12 @@ static void setFlightControlWifiState(bool coexist, bool switchOnly)
 
 void setFlightControlWifiCoexist(bool enabled)
 {
-  setFlightControlWifiState(enabled, false);
+  setFlightControlWifiState(enabled);
 }
 
 bool isFlightControlWifiCoexist()
 {
   return flightControlWifiCoexist;
-}
-
-void setFlightControlWifiSwitchOnly(bool enabled)
-{
-  setFlightControlWifiState(enabled, enabled);
-}
-
-bool isFlightControlWifiSwitchOnly()
-{
-  return flightControlWifiSwitchOnly;
 }
 #endif
 

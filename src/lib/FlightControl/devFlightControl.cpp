@@ -27,8 +27,8 @@ static uint32_t wifiSwitchSinceMs = 0;
 
 static void updateWifiModeSwitch(uint32_t nowMs)
 {
-    // Coexistence has priority when configured ranges overlap, followed by
-    // pure WiFi. RF is the safe fallback when no enabled condition matches.
+    // Coexistence has priority when configured ranges overlap. RF is the
+    // safe fallback when no enabled condition matches.
     uint8_t candidate = FLIGHT_CONTROL_WIFI_MODE_RF;
     for (int8_t mode = FLIGHT_CONTROL_WIFI_MODE_COEXIST; mode >= FLIGHT_CONTROL_WIFI_MODE_RF; --mode)
     {
@@ -49,13 +49,7 @@ static void updateWifiModeSwitch(uint32_t nowMs)
     }
     if (candidate == wifiSwitchMode || (uint32_t)(nowMs - wifiSwitchSinceMs) < 300) return;
     wifiSwitchMode = candidate;
-    if (candidate == 1) {
-        // Middle position: start WiFi without stopping ELRS. While active,
-        // CH7 is the only RC input acted on so it can switch back to RF mode.
-        setFlightControlWifiSwitchOnly(true);
-    } else {
-        setFlightControlWifiCoexist(candidate == 2);
-    }
+    setFlightControlWifiCoexist(candidate == FLIGHT_CONTROL_WIFI_MODE_COEXIST);
 }
 
 extern Telemetry telemetry;
@@ -76,11 +70,6 @@ const FlightControlMixerOutput &flightControlGetMixerOutput()
 bool flightControlGetDebugSnapshot(FlightControlDebugSnapshot &snapshot)
 {
     return runtime.getDebugSnapshot(snapshot);
-}
-
-bool flightControlWifiSwitchOnlyActive()
-{
-    return isFlightControlWifiSwitchOnly();
 }
 
 #if defined(USE_MSP_WIFI)
@@ -206,17 +195,10 @@ static bool rcInputReady()
 
 static int timeout()
 {
-    // Always inspect CH7 while the receiver is connected, including the
-    // switch-only WiFi state. The radio remains alive in that state.
+    // Always inspect the configured mode channel while the receiver is connected.
     if (connectionState == connected && connectionHasModelMatch && teamraceHasModelMatch)
     {
         updateWifiModeSwitch(millis());
-    }
-
-    if (isFlightControlWifiSwitchOnly())
-    {
-        runtime.reset();
-        return 4;
     }
 
     if (!rcInputReady())

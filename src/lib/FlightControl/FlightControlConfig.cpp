@@ -54,7 +54,6 @@ void FlightControlConfig::SetDefaults()
         m_wifiModeChannels[mode] = FC_WIFI_CHANNEL_DEFAULT;
     }
     m_wifiModeRanges[FLIGHT_CONTROL_WIFI_MODE_RF] = {900, 1300};
-    m_wifiModeRanges[FLIGHT_CONTROL_WIFI_MODE_WIFI] = {1300, 1700};
     m_wifiModeRanges[FLIGHT_CONTROL_WIFI_MODE_COEXIST] = {1700, 2100};
     m_armMode = false;
     m_armChannel = FC_ARM_CHANNEL_DEFAULT;
@@ -158,7 +157,7 @@ void FlightControlConfig::Load()
     JsonObject wifiConditions = doc["wifi_conditions"].as<JsonObject>();
     if (!wifiConditions.isNull())
     {
-        const char *keys[] = {"rf", "wifi", "coexist"};
+        const char *keys[] = {"rf", "coexist"};
         for (uint8_t mode = 0; mode < FLIGHT_CONTROL_WIFI_MODE_COUNT; ++mode)
         {
             JsonArray condition = wifiConditions[keys[mode]].as<JsonArray>();
@@ -259,7 +258,7 @@ bool FlightControlConfig::Commit()
         condition.add(m_modeRanges[mode].endUs);
     }
     JsonObject wifiConditions = doc["wifi_conditions"].to<JsonObject>();
-    const char *wifiKeys[] = {"rf", "wifi", "coexist"};
+    const char *wifiKeys[] = {"rf", "coexist"};
     for (uint8_t mode = 0; mode < FLIGHT_CONTROL_WIFI_MODE_COUNT; ++mode)
     {
         if (!m_wifiModeEnabled[mode]) continue;

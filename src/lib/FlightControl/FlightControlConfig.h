@@ -43,7 +43,6 @@ enum FlightControlMode : uint8_t
 enum FlightControlWifiMode : uint8_t
 {
     FLIGHT_CONTROL_WIFI_MODE_RF = 0,
-    FLIGHT_CONTROL_WIFI_MODE_WIFI,
     FLIGHT_CONTROL_WIFI_MODE_COEXIST,
     FLIGHT_CONTROL_WIFI_MODE_COUNT,
 };
