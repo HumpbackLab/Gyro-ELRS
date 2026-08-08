@@ -50,6 +50,15 @@ bool FlightControlSensorBackend::read(FlightControlImuSample &sample)
         gyroSample.accelMps2.y,
         gyroSample.accelMps2.z,
     };
+    const float *gyroBias = flightControlConfig.GetGyroBias();
+    const float *accelBias = flightControlConfig.GetAccelBias();
+    const float *accelScale = flightControlConfig.GetAccelScale();
+    sample.gyroDps.x -= gyroBias[0];
+    sample.gyroDps.y -= gyroBias[1];
+    sample.gyroDps.z -= gyroBias[2];
+    sample.accelMps2.x = (sample.accelMps2.x - accelBias[0]) * accelScale[0];
+    sample.accelMps2.y = (sample.accelMps2.y - accelBias[1]) * accelScale[1];
+    sample.accelMps2.z = (sample.accelMps2.z - accelBias[2]) * accelScale[2];
     sample.timestampMs = gyroSample.timestampMs;
     sample.gyroValid = true;
     sample.accelValid = gyroSample.accelValid;

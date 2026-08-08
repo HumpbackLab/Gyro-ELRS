@@ -23,6 +23,9 @@ void FlightControlConfig::SetDefaults()
     memset(m_mixer, 0, sizeof(m_mixer));
     memset(m_mixerOutputServo, 0, sizeof(m_mixerOutputServo));
     memset(m_orientation, 0, sizeof(m_orientation));
+    memset(m_gyroBias, 0, sizeof(m_gyroBias));
+    memset(m_accelBias, 0, sizeof(m_accelBias));
+    for (uint8_t axis = 0; axis < FC_IMU_AXIS_COUNT; ++axis) m_accelScale[axis] = 1.0f;
     for (uint8_t output = 0; output < FC_PWM_OUTPUT_MAX_COUNT; ++output)
     {
         m_pwmOutputLimits[output] = {
@@ -200,6 +203,16 @@ void FlightControlConfig::Load()
             m_orientation[i] = orientation[i].as<float>();
         }
     }
+    JsonArray gyroBias = doc["gyro_bias"].as<JsonArray>();
+    for (uint8_t axis = 0; axis < min(gyroBias.size(), (size_t)FC_IMU_AXIS_COUNT); ++axis) m_gyroBias[axis] = gyroBias[axis].as<float>();
+    JsonArray accelBias = doc["accel_bias"].as<JsonArray>();
+    for (uint8_t axis = 0; axis < min(accelBias.size(), (size_t)FC_IMU_AXIS_COUNT); ++axis) m_accelBias[axis] = accelBias[axis].as<float>();
+    JsonArray accelScale = doc["accel_scale"].as<JsonArray>();
+    for (uint8_t axis = 0; axis < min(accelScale.size(), (size_t)FC_IMU_AXIS_COUNT); ++axis)
+    {
+        const float value = accelScale[axis].as<float>();
+        if (isfinite(value) && value > 0.5f && value < 1.5f) m_accelScale[axis] = value;
+    }
 
     JsonArray pwmOutputLimits = doc["pwm_output_limits"].as<JsonArray>();
     for (uint8_t output = 0; output < min(pwmOutputLimits.size(), (size_t)FC_PWM_OUTPUT_MAX_COUNT); ++output)
@@ -267,6 +280,9 @@ bool FlightControlConfig::Commit()
         mixerServos.add(m_mixerOutputServo[output]);
     }
     copyArray(m_orientation, doc["orientation"].to<JsonArray>());
+    copyArray(m_gyroBias, doc["gyro_bias"].to<JsonArray>());
+    copyArray(m_accelBias, doc["accel_bias"].to<JsonArray>());
+    copyArray(m_accelScale, doc["accel_scale"].to<JsonArray>());
     JsonArray pwmOutputLimits = doc["pwm_output_limits"].to<JsonArray>();
     for (uint8_t output = 0; output < FC_PWM_OUTPUT_MAX_COUNT; ++output)
     {
@@ -479,6 +495,35 @@ void FlightControlConfig::SetOrientation(const float *values, uint8_t count)
         memcpy(m_orientation, values, sizeof(m_orientation));
         m_modified = true;
     }
+}
+
+static bool setImuVector(float *target, const float *values, uint8_t count, bool positiveOnly)
+{
+    if (!values || count < FC_IMU_AXIS_COUNT) return false;
+    float next[FC_IMU_AXIS_COUNT];
+    for (uint8_t axis = 0; axis < FC_IMU_AXIS_COUNT; ++axis)
+    {
+        next[axis] = values[axis];
+        if (!isfinite(next[axis]) || (positiveOnly && (next[axis] <= 0.5f || next[axis] >= 1.5f))) return false;
+    }
+    if (memcmp(target, next, sizeof(next)) == 0) return false;
+    memcpy(target, next, sizeof(next));
+    return true;
+}
+
+void FlightControlConfig::SetGyroBias(const float *values, uint8_t count)
+{
+    if (setImuVector(m_gyroBias, values, count, false)) m_modified = true;
+}
+
+void FlightControlConfig::SetAccelBias(const float *values, uint8_t count)
+{
+    if (setImuVector(m_accelBias, values, count, false)) m_modified = true;
+}
+
+void FlightControlConfig::SetAccelScale(const float *values, uint8_t count)
+{
+    if (setImuVector(m_accelScale, values, count, true)) m_modified = true;
 }
 
 void FlightControlConfig::SetPwmOutputLimits(uint8_t output, uint16_t minUs, uint16_t centerUs, uint16_t maxUs)

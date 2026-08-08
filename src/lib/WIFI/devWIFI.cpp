@@ -613,6 +613,9 @@ static void GetConfiguration(AsyncWebServerRequest *request)
       mixerServos.add(flightControlConfig.GetMixerOutputServo(output));
     }
     FlightControlFloatArrayToJson(configJson, "fc_orientation", flightControlConfig.GetOrientation(), FC_ORIENTATION_VALUE_COUNT);
+    FlightControlFloatArrayToJson(configJson, "fc_gyro_bias", flightControlConfig.GetGyroBias(), FC_IMU_AXIS_COUNT);
+    FlightControlFloatArrayToJson(configJson, "fc_accel_bias", flightControlConfig.GetAccelBias(), FC_IMU_AXIS_COUNT);
+    FlightControlFloatArrayToJson(configJson, "fc_accel_scale", flightControlConfig.GetAccelScale(), FC_IMU_AXIS_COUNT);
     configJson["fc_pwm_output_wifi_enabled"] = flightControlConfig.GetPwmOutputWifiEnabled();
     #if defined(GPIO_PIN_PWM_OUTPUTS)
     for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
@@ -903,6 +906,24 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
   JsonFlightControlMixerToConfig(json);
   JsonFlightControlMixerServosToConfig(json);
   JsonFlightControlOrientationToConfig(json);
+  if (json.containsKey("fc_gyro_bias"))
+  {
+    float values[FC_IMU_AXIS_COUNT];
+    JsonArray array = json["fc_gyro_bias"].as<JsonArray>();
+    if (array.size() >= FC_IMU_AXIS_COUNT) { for (uint8_t i=0; i<FC_IMU_AXIS_COUNT; ++i) values[i]=array[i].as<float>(); flightControlConfig.SetGyroBias(values, FC_IMU_AXIS_COUNT); }
+  }
+  if (json.containsKey("fc_accel_bias"))
+  {
+    float values[FC_IMU_AXIS_COUNT];
+    JsonArray array = json["fc_accel_bias"].as<JsonArray>();
+    if (array.size() >= FC_IMU_AXIS_COUNT) { for (uint8_t i=0; i<FC_IMU_AXIS_COUNT; ++i) values[i]=array[i].as<float>(); flightControlConfig.SetAccelBias(values, FC_IMU_AXIS_COUNT); }
+  }
+  if (json.containsKey("fc_accel_scale"))
+  {
+    float values[FC_IMU_AXIS_COUNT];
+    JsonArray array = json["fc_accel_scale"].as<JsonArray>();
+    if (array.size() >= FC_IMU_AXIS_COUNT) { for (uint8_t i=0; i<FC_IMU_AXIS_COUNT; ++i) values[i]=array[i].as<float>(); flightControlConfig.SetAccelScale(values, FC_IMU_AXIS_COUNT); }
+  }
   if (json.containsKey("fc_pwm_output_wifi_enabled"))
   {
     flightControlConfig.SetPwmOutputWifiEnabled(json["fc_pwm_output_wifi_enabled"] | false);
