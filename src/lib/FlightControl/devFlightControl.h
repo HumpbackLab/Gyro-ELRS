@@ -37,6 +37,7 @@ struct FlightControlMixerOutput {
 
 struct FlightControlDebugSnapshot {
     FlightControlImuSample imu;
+    FlightControlVector3 filteredGyroDps;
     FlightControlAttitude attitude;
     FlightControlAttitude accelAttitude;
     FlightControlMixerOutput mixerOutput;

@@ -96,14 +96,17 @@ static bool handleLocalMspRequest(uint16_t function,
     static constexpr uint16_t FC_DEBUG_PAYLOAD_SIZE = 40;
     static constexpr uint16_t FC_PID_DEBUG_PAYLOAD_SIZE = 28;
     static constexpr uint16_t FC_IMU_DEBUG_PAYLOAD_SIZE = 18;
+    static constexpr uint16_t FC_ATTITUDE_DEBUG_PAYLOAD_SIZE = 6;
     // Keep the original combined response wire-compatible with released
     // configurator v0.1.7; new clients use the split PID and IMU requests.
     const bool legacyDebug = function == MSP_ELRS_FC_DEBUG;
     const bool pidDebug = function == MSP_ELRS_FC_PID_DEBUG;
     const bool imuDebug = function == MSP_ELRS_FC_IMU_DEBUG;
+    const bool attitudeDebug = function == MSP_ELRS_FC_ATTITUDE_DEBUG;
     const uint16_t requiredCapacity = legacyDebug ? FC_DEBUG_PAYLOAD_SIZE
         : pidDebug ? FC_PID_DEBUG_PAYLOAD_SIZE
-        : imuDebug ? FC_IMU_DEBUG_PAYLOAD_SIZE : 0;
+        : imuDebug ? FC_IMU_DEBUG_PAYLOAD_SIZE
+        : attitudeDebug ? FC_ATTITUDE_DEBUG_PAYLOAD_SIZE : 0;
     if (requiredCapacity == 0 || responseCapacity < requiredCapacity)
     {
         return false;
@@ -113,11 +116,12 @@ static bool handleLocalMspRequest(uint16_t function,
     flightControlGetDebugSnapshot(snapshot);
 
     responsePayloadLen = 0;
-    if (legacyDebug || imuDebug)
+    if (legacyDebug || imuDebug || attitudeDebug)
     {
         appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.attitude.rollDeg, 100.0f));
         appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.attitude.pitchDeg, 100.0f));
         appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.attitude.yawDeg, 100.0f));
+        if (attitudeDebug) return true;
         if (legacyDebug)
         {
             appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.accelAttitude.rollDeg, 100.0f));
@@ -148,12 +152,15 @@ static bool handleLocalMspRequest(uint16_t function,
     appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.yawRateTarget, 10.0f));
     if (pidDebug)
     {
-        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.x, 100.0f));
-        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.y, 100.0f));
-        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.z, 100.0f));
+        // PID charts report the gyro signal consumed by the controller after
+        // the configured low-pass stage.
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.filteredGyroDps.x, 100.0f));
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.filteredGyroDps.y, 100.0f));
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.filteredGyroDps.z, 100.0f));
     }
     return true;
 }
+
 #endif
 
 static void reportAttitude(uint32_t nowMs)

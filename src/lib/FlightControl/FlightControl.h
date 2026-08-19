@@ -106,6 +106,7 @@ private:
     FlightControlOrientation _orientation;
     FlightControlMixerOutput _mixerOutput = {};
     FlightControlImuSample _lastImuSample = {};
+    FlightControlVector3 _lastFilteredGyroDps = {};
     FlightControlVector3 _filteredGyroDps = {};
     uint32_t _lastDebugUpdateMs = 0;
     uint16_t _lastUpdateDtUs = 0;

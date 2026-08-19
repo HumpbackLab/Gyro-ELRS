@@ -41,6 +41,7 @@
 #define MSP_ELRS_FC_DEBUG                   0x0450
 #define MSP_ELRS_FC_PID_DEBUG               0x0451
 #define MSP_ELRS_FC_IMU_DEBUG               0x0452
+#define MSP_ELRS_FC_ATTITUDE_DEBUG          0x0455
 
 // CRSF encapsulated msp defines
 #define ENCAPSULATED_MSP_HEADER_CRC_LEN     4

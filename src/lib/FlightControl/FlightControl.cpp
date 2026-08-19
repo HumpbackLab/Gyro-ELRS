@@ -372,6 +372,7 @@ void FlightControlRuntime::reset()
     // safe minimum output instead of retaining the last control value.
     _mixerOutput = _mixer.mix(0.0f, 0.0f, 0.0f, 0.0f);
     _lastImuSample = {};
+    _lastFilteredGyroDps = {};
     _lastDebugUpdateMs = 0;
     _lastUpdateDtUs = 0;
     _lastSampleAgeMs = 0;
@@ -430,6 +431,7 @@ bool FlightControlRuntime::readTransformedImu(FlightControlImuSample &sample, fl
     // Gyro LPF is input conditioning for both the complementary estimator and
     // the rate controller; it intentionally does not alter the debug sample.
     filterGyro(sample, dt);
+    _lastFilteredGyroDps = sample.gyroDps;
     return true;
 }
 
@@ -653,6 +655,7 @@ bool FlightControlRuntime::getDebugSnapshot(FlightControlDebugSnapshot &snapshot
 {
     snapshot = {};
     snapshot.imu = _lastImuSample;
+    snapshot.filteredGyroDps = _lastFilteredGyroDps;
     snapshot.attitude = _estimator.attitude();
     snapshot.accelAttitude = _estimator.accelAttitude();
     snapshot.mixerOutput = _mixerOutput;
