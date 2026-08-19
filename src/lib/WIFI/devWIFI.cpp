@@ -1748,6 +1748,8 @@ static int event()
     wifiStarted = false;
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
+    wifiMode = WIFI_OFF;
+    changeMode = WIFI_OFF;
     #if defined(PLATFORM_ESP8266)
     WiFi.forceSleepBegin();
     #endif
@@ -1826,6 +1828,8 @@ static void setFlightControlWifiState(bool coexist)
       wifiStarted = false;
       WiFi.disconnect(true);
       WiFi.mode(WIFI_OFF);
+      wifiMode = WIFI_OFF;
+      changeMode = WIFI_OFF;
     }
   }
   devicesTriggerEvent();
