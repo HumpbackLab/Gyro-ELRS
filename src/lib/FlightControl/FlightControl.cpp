@@ -12,10 +12,16 @@
 
 static constexpr uint32_t FC_UPDATE_INTERVAL_US = 4000;
 static constexpr float FC_MAX_ROLL_PITCH_DEG = 35.0f;
-static constexpr float FC_MAX_YAW_RATE_DPS = 180.0f;
+static constexpr float FC_MAX_RATE_DPS = 180.0f;
 static constexpr float FC_COMPLEMENTARY_ALPHA = 0.98f;
 static constexpr uint16_t FC_COMPLEMENTARY_ALPHA_PERMILLE = (uint16_t)(FC_COMPLEMENTARY_ALPHA * 1000.0f);
+// Convert the legacy per-update alpha at 250 Hz to a correction rate. This
+// keeps the filter response stable if the actual update interval jitters.
+static constexpr float FC_COMPLEMENTARY_GAIN_PER_SECOND = 5.05068f; // -ln(0.98) / 0.004
 static constexpr float FC_STANDARD_GRAVITY = 9.80665f;
+static constexpr float FC_ACCEL_FULL_TRUST_DEVIATION = 0.10f;
+static constexpr float FC_ACCEL_REJECT_DEVIATION = 0.35f;
+static constexpr float FC_ESTIMATOR_MAX_DT = 0.02f;
 static constexpr uint8_t FC_PID_COLUMNS = 4;
 static constexpr uint8_t FC_PID_AXES = 3;
 static constexpr float FC_MANUAL_CONTROL_RANGE = 500.0f;
@@ -69,55 +75,166 @@ static float wrapDegrees180(float angle)
     return angle;
 }
 
+static void quaternionFromEuler(float rollDeg, float pitchDeg, float yawDeg, float &w, float &x, float &y, float &z)
+{
+    const float roll = rollDeg * PI / 180.0f;
+    const float pitch = pitchDeg * PI / 180.0f;
+    const float yaw = yawDeg * PI / 180.0f;
+
+    const float cr = cosf(roll * 0.5f);
+    const float sr = sinf(roll * 0.5f);
+    const float cp = cosf(pitch * 0.5f);
+    const float sp = sinf(pitch * 0.5f);
+    const float cy = cosf(yaw * 0.5f);
+    const float sy = sinf(yaw * 0.5f);
+
+    w = cr * cp * cy + sr * sp * sy;
+    x = sr * cp * cy - cr * sp * sy;
+    y = cr * sp * cy + sr * cp * sy;
+    z = cr * cp * sy - sr * sp * cy;
+}
+
+static void quaternionToEuler(float w, float x, float y, float z, float &rollDeg, float &pitchDeg, float &yawDeg)
+{
+    rollDeg = atan2f(2.0f * (w * x + y * z), 1.0f - 2.0f * (x * x + y * y)) * 180.0f / PI;
+    pitchDeg = asinf(constrain(2.0f * (w * y - z * x), -1.0f, 1.0f)) * 180.0f / PI;
+    yawDeg = atan2f(2.0f * (w * z + x * y), 1.0f - 2.0f * (y * y + z * z)) * 180.0f / PI;
+}
+
+static void normalizeQuaternion(float &w, float &x, float &y, float &z)
+{
+    const float normSquared = w * w + x * x + y * y + z * z;
+    if (isfinite(normSquared) && normSquared > 1.0e-12f)
+    {
+        const float invNorm = 1.0f / sqrtf(normSquared);
+        w *= invNorm;
+        x *= invNorm;
+        y *= invNorm;
+        z *= invNorm;
+    }
+    else
+    {
+        w = 1.0f;
+        x = 0.0f;
+        y = 0.0f;
+        z = 0.0f;
+    }
+}
+
 void FlightControlEstimator::reset()
 {
     _attitude = {};
     _accelAttitude = {};
     _attitudeValid = false;
+    _quatW = 1.0f;
+    _quatX = 0.0f;
+    _quatY = 0.0f;
+    _quatZ = 0.0f;
 }
 
 void FlightControlEstimator::update(const FlightControlImuSample &sample, float dt)
 {
-    const bool hadAttitude = _attitudeValid;
-
-    if (sample.gyroValid && dt > 0.0f)
-    {
-        _attitude.rollDeg = wrapDegrees180(_attitude.rollDeg + sample.gyroDps.x * dt);
-        _attitude.pitchDeg = wrapDegrees180(_attitude.pitchDeg + sample.gyroDps.y * dt);
-        _attitude.yawDeg = wrapDegrees180(_attitude.yawDeg + sample.gyroDps.z * dt);
-        _attitudeValid = true;
-    }
+    float accelRoll = 0.0f;
+    float accelPitch = 0.0f;
+    float accelNormX = 0.0f;
+    float accelNormY = 0.0f;
+    float accelNormZ = 0.0f;
+    float accelTrust = 0.0f;
+    bool accelReady = false;
 
     if (sample.accelValid)
     {
         const float ax = sample.accelMps2.x;
         const float ay = sample.accelMps2.y;
         const float az = sample.accelMps2.z;
-        const float accelMag = sqrtf(ax * ax + ay * ay + az * az);
-        if (accelMag > FC_STANDARD_GRAVITY * 0.5f && accelMag < FC_STANDARD_GRAVITY * 1.5f)
+        const float accelMagnitudeSquared = ax * ax + ay * ay + az * az;
+        if (isfinite(accelMagnitudeSquared) && accelMagnitudeSquared > 1.0e-6f)
         {
-            const float accelRoll = atan2f(ay, az) * 180.0f / PI;
-            const float accelPitch = atan2f(-ax, sqrtf(ay * ay + az * az)) * 180.0f / PI;
+            const float accelMag = sqrtf(accelMagnitudeSquared);
+            const float invMag = 1.0f / accelMag;
+            accelNormX = ax * invMag;
+            accelNormY = ay * invMag;
+            accelNormZ = az * invMag;
+            accelRoll = atan2f(accelNormY, accelNormZ) * 180.0f / PI;
+            accelPitch = atan2f(-accelNormX, sqrtf(accelNormY * accelNormY + accelNormZ * accelNormZ)) * 180.0f / PI;
             _accelAttitude.rollDeg = accelRoll;
             _accelAttitude.pitchDeg = accelPitch;
             _accelAttitude.yawDeg = 0.0f;
 
-            if (!hadAttitude || !sample.gyroValid)
+            // Linear acceleration must not be interpreted as tilt. Use full
+            // correction close to 1 g, then fade it out instead of abruptly
+            // enabling/disabling the accelerometer at wide 0.5/1.5 g limits.
+            const float deviation = fabsf(accelMag - FC_STANDARD_GRAVITY) / FC_STANDARD_GRAVITY;
+            if (deviation < FC_ACCEL_REJECT_DEVIATION)
             {
-                _attitude.rollDeg = accelRoll;
-                _attitude.pitchDeg = accelPitch;
-                _attitudeValid = true;
-            }
-            else
-            {
-                _attitude.rollDeg = wrapDegrees180(
-                    FC_COMPLEMENTARY_ALPHA * _attitude.rollDeg +
-                    (1.0f - FC_COMPLEMENTARY_ALPHA) * accelRoll);
-                _attitude.pitchDeg = wrapDegrees180(
-                    FC_COMPLEMENTARY_ALPHA * _attitude.pitchDeg +
-                    (1.0f - FC_COMPLEMENTARY_ALPHA) * accelPitch);
+                accelTrust = deviation <= FC_ACCEL_FULL_TRUST_DEVIATION
+                    ? 1.0f
+                    : 1.0f - (deviation - FC_ACCEL_FULL_TRUST_DEVIATION) /
+                        (FC_ACCEL_REJECT_DEVIATION - FC_ACCEL_FULL_TRUST_DEVIATION);
+                accelReady = true;
             }
         }
+    }
+
+    // Seed the actual quaternion, not just the reported Euler angles. The old
+    // path initialized the display from accel while leaving the quaternion at
+    // identity, causing the estimate to jump back on the following update.
+    if (!_attitudeValid && accelReady)
+    {
+        quaternionFromEuler(accelRoll, accelPitch, 0.0f, _quatW, _quatX, _quatY, _quatZ);
+        normalizeQuaternion(_quatW, _quatX, _quatY, _quatZ);
+        _attitudeValid = true;
+    }
+
+    const bool gyroReady = sample.gyroValid && isfinite(dt) && dt > 0.0f && dt <= FC_ESTIMATOR_MAX_DT &&
+        isfinite(sample.gyroDps.x) && isfinite(sample.gyroDps.y) && isfinite(sample.gyroDps.z);
+    if (gyroReady)
+    {
+        float gx = sample.gyroDps.x * PI / 180.0f;
+        float gy = sample.gyroDps.y * PI / 180.0f;
+        float gz = sample.gyroDps.z * PI / 180.0f;
+
+        if (accelReady)
+        {
+            const float vx = 2.0f * (_quatX * _quatZ - _quatW * _quatY);
+            const float vy = 2.0f * (_quatW * _quatX + _quatY * _quatZ);
+            const float vz = _quatW * _quatW - _quatX * _quatX - _quatY * _quatY + _quatZ * _quatZ;
+            const float ex = accelNormY * vz - accelNormZ * vy;
+            const float ey = accelNormZ * vx - accelNormX * vz;
+            const float ez = accelNormX * vy - accelNormY * vx;
+
+            const float correctionGain = FC_COMPLEMENTARY_GAIN_PER_SECOND * accelTrust;
+            gx += correctionGain * ex;
+            gy += correctionGain * ey;
+            gz += correctionGain * ez;
+        }
+
+        const float halfDt = 0.5f * dt;
+        float q0Tmp = _quatW + (-_quatX * gx - _quatY * gy - _quatZ * gz) * halfDt;
+        float q1Tmp = _quatX + (_quatW * gx + _quatY * gz - _quatZ * gy) * halfDt;
+        float q2Tmp = _quatY + (_quatW * gy - _quatX * gz + _quatZ * gx) * halfDt;
+        float q3Tmp = _quatZ + (_quatW * gz + _quatX * gy - _quatY * gx) * halfDt;
+
+        normalizeQuaternion(q0Tmp, q1Tmp, q2Tmp, q3Tmp);
+        _quatW = q0Tmp;
+        _quatX = q1Tmp;
+        _quatY = q2Tmp;
+        _quatZ = q3Tmp;
+        _attitudeValid = true;
+    }
+    if (_attitudeValid)
+    {
+        float quatRoll = 0.0f;
+        float quatPitch = 0.0f;
+        float quatYaw = 0.0f;
+        quaternionToEuler(_quatW, _quatX, _quatY, _quatZ, quatRoll, quatPitch, quatYaw);
+
+        // Gravity correction is already applied in quaternion space. A second
+        // Euler-space blend would double-count accel and can behave badly near
+        // the +/-180 degree wrap boundary.
+        _attitude.rollDeg = wrapDegrees180(quatRoll);
+        _attitude.pitchDeg = wrapDegrees180(quatPitch);
+        _attitude.yawDeg = wrapDegrees180(quatYaw);
     }
 }
 
@@ -250,11 +367,9 @@ void FlightControlRuntime::begin()
 void FlightControlRuntime::reset()
 {
     _estimator.reset();
-    resetPidState();
-    // Preserve the configured motor count so consumers can actively drive a
-    // safe minimum output instead of retaining the last control value.
-    _mixerOutput = _mixer.mix(0.0f, 0.0f, 0.0f, 0.0f);
+    resetControlState();
     _lastImuSample = {};
+    _lastFilteredGyroDps = {};
     _lastDebugUpdateMs = 0;
     _lastUpdateDtUs = 0;
     _lastSampleAgeMs = 0;
@@ -262,6 +377,7 @@ void FlightControlRuntime::reset()
     _filteredGyroDps = {};
     _gyroFilterInitialized = false;
     _gyroFilterHz = 0;
+    _armed = false;
 }
 
 void FlightControlRuntime::resetPidState()
@@ -272,6 +388,56 @@ void FlightControlRuntime::resetPidState()
     _rollAnglePid.reset();
     _pitchAnglePid.reset();
     _yawAnglePid.reset();
+}
+
+void FlightControlRuntime::resetControlState()
+{
+    resetPidState();
+    _rollAngleTarget = _pitchAngleTarget = 0.0f;
+    _rollRateTarget = _pitchRateTarget = _yawRateTarget = 0.0f;
+    // Preserve the configured output count while immediately replacing every
+    // previous PID/mixer command with the safe motor minimum or servo center.
+    _mixerOutput = _mixer.mix(0.0f, 0.0f, 0.0f, 0.0f);
+}
+
+bool FlightControlRuntime::readTransformedImu(FlightControlImuSample &sample, float dt)
+{
+    // Keep a single, explicit IMU pipeline:
+    // sensor/raw frame -> configured orientation transform -> saved
+    // aircraft-frame bias/scale calibration -> estimator input.
+    if (!_sensors.read(sample))
+    {
+        return false;
+    }
+
+    _orientation.apply(sample);
+
+    const float *gyroBias = flightControlConfig.GetGyroBias();
+    const float *accelBias = flightControlConfig.GetAccelBias();
+    const float *accelScale = flightControlConfig.GetAccelScale();
+    if (sample.gyroValid)
+    {
+        // Bias calibration feeds both the attitude estimator and rate controller.
+        sample.gyroDps.x -= gyroBias[0];
+        sample.gyroDps.y -= gyroBias[1];
+        sample.gyroDps.z -= gyroBias[2];
+    }
+    if (sample.accelValid)
+    {
+        sample.accelMps2.x = (sample.accelMps2.x - accelBias[0]) * accelScale[0];
+        sample.accelMps2.y = (sample.accelMps2.y - accelBias[1]) * accelScale[1];
+        sample.accelMps2.z = (sample.accelMps2.z - accelBias[2]) * accelScale[2];
+    }
+
+    // Debug consumers see calibrated aircraft-frame values before gyro LPF or
+    // complementary-filter corrections are applied.
+    _lastImuSample = sample;
+
+    // Gyro LPF is input conditioning for both the complementary estimator and
+    // the rate controller; it intentionally does not alter the debug sample.
+    filterGyro(sample, dt);
+    _lastFilteredGyroDps = sample.gyroDps;
+    return true;
 }
 
 void FlightControlRuntime::filterGyro(FlightControlImuSample &sample, float dt)
@@ -352,27 +518,23 @@ void FlightControlRuntime::updateAttitudeOnly(uint32_t nowUs)
         return;
     }
 
-    if (_lastUpdateUs != 0 && (uint32_t)(nowUs - _lastUpdateUs) < FC_UPDATE_INTERVAL_US)
-    {
-        return;
-    }
-
+    // FlightControl_device already schedules this function every 4 ms. Do not
+    // apply a second strict microsecond gate here: millisecond scheduler jitter
+    // can invoke us a few microseconds early, and rejecting that invocation
+    // turns an otherwise valid 4 ms update into an 8 ms gap.
     const uint32_t dtUs = _lastUpdateUs == 0 ? FC_UPDATE_INTERVAL_US : (uint32_t)(nowUs - _lastUpdateUs);
     const float dt = dtUs * 1e-6f;
     _lastUpdateUs = nowUs;
     _lastUpdateDtUs = (uint16_t)constrain(dtUs, 0U, 65535U);
 
     FlightControlImuSample sample = {};
-    if (!_sensors.read(sample))
+    if (!readTransformedImu(sample, dt))
     {
         _sensorsReady = false;
         reset();
         return;
     }
 
-    _orientation.apply(sample);
-    filterGyro(sample, dt);
-    _lastImuSample = sample;
     _lastDebugUpdateMs = millis();
     _lastSampleAgeMs = sample.timestampMs == 0 ? 0 : (uint16_t)constrain((uint32_t)(_lastDebugUpdateMs - sample.timestampMs), 0U, 65535U);
     _estimator.update(sample, dt);
@@ -388,7 +550,7 @@ void FlightControlRuntime::loadStickTargets(float &throttle, float &roll, float 
     throttle = constrain((throttleUs - 988.0f) / (2012.0f - 988.0f), 0.0f, 1.0f) * 1000;
     roll = constrain((rollUs - 1500.0f) / 500.0f, -1.0f, 1.0f) * FC_MAX_ROLL_PITCH_DEG;
     pitch = constrain((pitchUs - 1500.0f) / 500.0f, -1.0f, 1.0f) * FC_MAX_ROLL_PITCH_DEG;
-    yaw = -constrain((yawUs - 1500.0f) / 500.0f, -1.0f, 1.0f) * FC_MAX_YAW_RATE_DPS;
+    yaw = -constrain((yawUs - 1500.0f) / 500.0f, -1.0f, 1.0f) * FC_MAX_RATE_DPS;
 }
 
 FlightControlMode FlightControlRuntime::readModeSwitch() const
@@ -419,29 +581,44 @@ void FlightControlRuntime::update(uint32_t nowUs)
         return;
     }
 
-    if (_lastUpdateUs != 0 && (uint32_t)(nowUs - _lastUpdateUs) < FC_UPDATE_INTERVAL_US)
-    {
-        return;
-    }
-
+    // Timing is owned by FlightControl_device. A duplicate gate here caused
+    // alternating 4/8 ms control updates when the device scheduler was only a
+    // few microseconds early.
     const uint32_t dtUs = _lastUpdateUs == 0 ? FC_UPDATE_INTERVAL_US : (uint32_t)(nowUs - _lastUpdateUs);
     const float dt = dtUs * 1e-6f;
     _lastUpdateUs = nowUs;
     _lastUpdateDtUs = (uint16_t)constrain(dtUs, 0U, 65535U);
 
     FlightControlImuSample sample = {};
-    if (!_sensors.read(sample))
+    if (!readTransformedImu(sample, dt))
     {
         _sensorsReady = false;
         reset();
         return;
     }
-    _orientation.apply(sample);
-    filterGyro(sample, dt);
-    _lastImuSample = sample;
     _lastDebugUpdateMs = millis();
     _lastSampleAgeMs = sample.timestampMs == 0 ? 0 : (uint16_t)constrain((uint32_t)(_lastDebugUpdateMs - sample.timestampMs), 0U, 65535U);
     _estimator.update(sample, dt);
+
+    const uint8_t armChannel = flightControlConfig.GetArmChannel();
+    const bool armActive = FlightControlRangeIsActive(
+        flightControlConfig.GetArmRange(), CRSF_to_US(ChannelData[armChannel]));
+    const bool wasArmed = _armed;
+    _armed = !flightControlConfig.GetArmMode() || armActive;
+    if (!_armed)
+    {
+        // Do not run either PID loop while locked. Clearing the complete
+        // controller state here also removes the last command immediately on
+        // the armed -> disarmed transition.
+        resetControlState();
+        return;
+    }
+    if (!wasArmed)
+    {
+        // Always begin a newly armed session without integrator or derivative
+        // history from a previous session.
+        resetControlState();
+    }
 
     const FlightControlMode nextMode = readModeSwitch();
     if (nextMode != _mode)
@@ -450,38 +627,41 @@ void FlightControlRuntime::update(uint32_t nowUs)
         _mode = nextMode;
     }
 
-    const uint8_t armChannel = flightControlConfig.GetArmChannel();
-    const bool armActive = FlightControlRangeIsActive(
-        flightControlConfig.GetArmRange(), CRSF_to_US(ChannelData[armChannel]));
-    if (flightControlConfig.GetArmMode() && !armActive)
-    {
-        resetPidState();
-        return;
-    }
-
     float throttle;
     float rollAngleTarget;
     float pitchAngleTarget;
     float yawRateTarget;
     loadStickTargets(throttle, rollAngleTarget, pitchAngleTarget, yawRateTarget);
 
+    _rollAngleTarget = rollAngleTarget;
+    _pitchAngleTarget = pitchAngleTarget;
+    _yawRateTarget = yawRateTarget;
+
     if (_mode == FLIGHT_CONTROL_MODE_MANUAL)
     {
         const float roll = rollAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MANUAL_CONTROL_RANGE;
         const float pitch = pitchAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MANUAL_CONTROL_RANGE;
-        const float yaw = yawRateTarget / FC_MAX_YAW_RATE_DPS * FC_MANUAL_CONTROL_RANGE;
+        const float yaw = yawRateTarget / FC_MAX_RATE_DPS * FC_MANUAL_CONTROL_RANGE;
         _mixerOutput = _mixer.mix(throttle, roll, pitch, yaw);
         return;
     }
 
-    float rollRateTarget = rollAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MAX_YAW_RATE_DPS;
-    float pitchRateTarget = pitchAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MAX_YAW_RATE_DPS;
+    float rollRateTarget = rollAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MAX_RATE_DPS;
+    float pitchRateTarget = pitchAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MAX_RATE_DPS;
 
     if (_mode == FLIGHT_CONTROL_MODE_ANGLE)
     {
-        rollRateTarget = _rollAnglePid.update(rollAngleTarget, _estimator.attitude().rollDeg, dt);
-        pitchRateTarget = _pitchAnglePid.update(pitchAngleTarget, _estimator.attitude().pitchDeg, dt);
+        rollRateTarget = constrain(
+            _rollAnglePid.update(rollAngleTarget, _estimator.attitude().rollDeg, dt),
+            -(float)flightControlConfig.GetAngleRateLimitDps(0),
+            (float)flightControlConfig.GetAngleRateLimitDps(0));
+        pitchRateTarget = constrain(
+            _pitchAnglePid.update(pitchAngleTarget, _estimator.attitude().pitchDeg, dt),
+            -(float)flightControlConfig.GetAngleRateLimitDps(1),
+            (float)flightControlConfig.GetAngleRateLimitDps(1));
     }
+    _rollRateTarget = rollRateTarget;
+    _pitchRateTarget = pitchRateTarget;
 
     const float gyroRoll = sample.gyroValid ? sample.gyroDps.x : 0.0f;
     const float gyroPitch = sample.gyroValid ? sample.gyroDps.y : 0.0f;
@@ -497,6 +677,7 @@ bool FlightControlRuntime::getDebugSnapshot(FlightControlDebugSnapshot &snapshot
 {
     snapshot = {};
     snapshot.imu = _lastImuSample;
+    snapshot.filteredGyroDps = _lastFilteredGyroDps;
     snapshot.attitude = _estimator.attitude();
     snapshot.accelAttitude = _estimator.accelAttitude();
     snapshot.mixerOutput = _mixerOutput;
@@ -509,6 +690,14 @@ bool FlightControlRuntime::getDebugSnapshot(FlightControlDebugSnapshot &snapshot
     snapshot.pidReady = _pidReady;
     snapshot.mode = _mode;
     snapshot.attitudeValid = _estimator.attitudeValid();
+    snapshot.rollAngleTarget = _rollAngleTarget;
+    snapshot.pitchAngleTarget = _pitchAngleTarget;
+    snapshot.rollAngleState = _estimator.attitude().rollDeg;
+    snapshot.pitchAngleState = _estimator.attitude().pitchDeg;
+    snapshot.rollRateTarget = _rollRateTarget;
+    snapshot.pitchRateTarget = _pitchRateTarget;
+    snapshot.yawRateTarget = _yawRateTarget;
+    snapshot.armed = _armed;
     return _lastDebugUpdateMs != 0;
 }
 

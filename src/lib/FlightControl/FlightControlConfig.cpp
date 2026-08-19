@@ -7,6 +7,7 @@
 #if defined(PLATFORM_ESP32)
 #include <SPIFFS.h>
 #endif
+#include <math.h>
 #include <string.h>
 
 static constexpr char FC_CONFIG_FILE[] = "/fc.json";
@@ -18,11 +19,18 @@ void FlightControlConfig::SetDefaults()
 {
     memset(m_ratePid, 0, sizeof(m_ratePid));
     memset(m_anglePid, 0, sizeof(m_anglePid));
+    for (uint8_t axis = 0; axis < FC_ANGLE_RATE_LIMIT_AXIS_COUNT; ++axis)
+    {
+        m_angleRateLimitDps[axis] = FC_ANGLE_RATE_LIMIT_DEFAULT_DPS;
+    }
     m_dtermLpfHz = FC_DTERM_LPF_DEFAULT_HZ;
     m_gyroLpfHz = FC_GYRO_LPF_DEFAULT_HZ;
     memset(m_mixer, 0, sizeof(m_mixer));
     memset(m_mixerOutputServo, 0, sizeof(m_mixerOutputServo));
     memset(m_orientation, 0, sizeof(m_orientation));
+    memset(m_gyroBias, 0, sizeof(m_gyroBias));
+    memset(m_accelBias, 0, sizeof(m_accelBias));
+    for (uint8_t axis = 0; axis < FC_IMU_AXIS_COUNT; ++axis) m_accelScale[axis] = 1.0f;
     for (uint8_t output = 0; output < FC_PWM_OUTPUT_MAX_COUNT; ++output)
     {
         m_pwmOutputLimits[output] = {
@@ -45,6 +53,9 @@ void FlightControlConfig::SetDefaults()
     }
     m_modeRanges[FLIGHT_CONTROL_MODE_RATE] = {1300, 1700};
     m_modeRanges[FLIGHT_CONTROL_MODE_ANGLE] = {1700, 2100};
+    m_wifiCoexistEnabled = false;
+    m_wifiCoexistChannel = FC_WIFI_CHANNEL_DEFAULT;
+    m_wifiCoexistRange = {1700, 2100};
     m_armMode = false;
     m_armChannel = FC_ARM_CHANNEL_DEFAULT;
     m_armRange = {1700, 2100};
@@ -81,6 +92,11 @@ void FlightControlConfig::Load()
     for (uint8_t i = 0; i < min(anglePid.size(), (size_t)FC_PID_TERM_COUNT); ++i)
     {
         m_anglePid[i] = anglePid[i].as<int16_t>();
+    }
+    JsonArray angleRateLimits = doc["angle_rate_limits_dps"].as<JsonArray>();
+    for (uint8_t axis = 0; axis < min(angleRateLimits.size(), (size_t)FC_ANGLE_RATE_LIMIT_AXIS_COUNT); ++axis)
+    {
+        SetAngleRateLimitDps(axis, angleRateLimits[axis].as<int>());
     }
     SetDtermLpfHz(doc["dterm_lpf_hz"] | FC_DTERM_LPF_DEFAULT_HZ);
     SetGyroLpfHz(doc["gyro_lpf_hz"] | FC_GYRO_LPF_DEFAULT_HZ);
@@ -144,6 +160,18 @@ void FlightControlConfig::Load()
             }
         }
     }
+    JsonObject wifiConditions = doc["wifi_conditions"].as<JsonObject>();
+    if (!wifiConditions.isNull())
+    {
+        JsonArray condition = wifiConditions["coexist"].as<JsonArray>();
+        SetWifiCoexistEnabled(condition.size() >= 3);
+        if (condition.size() >= 3)
+        {
+            const int channel = condition[0].as<int>();
+            SetWifiCoexistChannel((uint8_t)constrain(channel - 1, FC_MODE_CHANNEL_MIN, FC_MODE_CHANNEL_MAX));
+            SetWifiCoexistRange(condition[1].as<uint16_t>(), condition[2].as<uint16_t>());
+        }
+    }
     m_armMode = doc["arm_enabled"] | false;
     const int armChannel = doc["arm_channel"] | (FC_ARM_CHANNEL_DEFAULT + 1);
     m_armChannel = (uint8_t)constrain(armChannel - 1, FC_MODE_CHANNEL_MIN, FC_MODE_CHANNEL_MAX);
@@ -175,6 +203,26 @@ void FlightControlConfig::Load()
             m_orientation[i] = orientation[i].as<float>();
         }
     }
+    JsonArray gyroBias = doc["gyro_bias"].as<JsonArray>();
+    if (gyroBias.size() >= FC_IMU_AXIS_COUNT)
+    {
+        float values[FC_IMU_AXIS_COUNT];
+        for (uint8_t axis = 0; axis < FC_IMU_AXIS_COUNT; ++axis) values[axis] = gyroBias[axis].as<float>();
+        SetGyroBias(values, FC_IMU_AXIS_COUNT);
+    }
+    JsonArray accelBias = doc["accel_bias"].as<JsonArray>();
+    if (accelBias.size() >= FC_IMU_AXIS_COUNT)
+    {
+        float values[FC_IMU_AXIS_COUNT];
+        for (uint8_t axis = 0; axis < FC_IMU_AXIS_COUNT; ++axis) values[axis] = accelBias[axis].as<float>();
+        SetAccelBias(values, FC_IMU_AXIS_COUNT);
+    }
+    JsonArray accelScale = doc["accel_scale"].as<JsonArray>();
+    for (uint8_t axis = 0; axis < min(accelScale.size(), (size_t)FC_IMU_AXIS_COUNT); ++axis)
+    {
+        const float value = accelScale[axis].as<float>();
+        if (isfinite(value) && value > 0.5f && value < 1.5f) m_accelScale[axis] = value;
+    }
 
     JsonArray pwmOutputLimits = doc["pwm_output_limits"].as<JsonArray>();
     for (uint8_t output = 0; output < min(pwmOutputLimits.size(), (size_t)FC_PWM_OUTPUT_MAX_COUNT); ++output)
@@ -205,6 +253,7 @@ bool FlightControlConfig::Commit()
     JsonDocument doc;
     copyArray(m_ratePid, doc["rate_pid"].to<JsonArray>());
     copyArray(m_anglePid, doc["angle_pid"].to<JsonArray>());
+    copyArray(m_angleRateLimitDps, doc["angle_rate_limits_dps"].to<JsonArray>());
     doc["dterm_lpf_hz"] = m_dtermLpfHz;
     doc["gyro_lpf_hz"] = m_gyroLpfHz;
     JsonObject modeConditions = doc["mode_conditions"].to<JsonObject>();
@@ -220,6 +269,14 @@ bool FlightControlConfig::Commit()
         condition.add(m_modeRanges[mode].startUs);
         condition.add(m_modeRanges[mode].endUs);
     }
+    JsonObject wifiConditions = doc["wifi_conditions"].to<JsonObject>();
+    if (m_wifiCoexistEnabled)
+    {
+        JsonArray condition = wifiConditions["coexist"].to<JsonArray>();
+        condition.add(m_wifiCoexistChannel + 1);
+        condition.add(m_wifiCoexistRange.startUs);
+        condition.add(m_wifiCoexistRange.endUs);
+    }
     doc["arm_enabled"] = m_armMode;
     doc["arm_channel"] = m_armChannel + 1;
     JsonArray armRange = doc["arm_range"].to<JsonArray>();
@@ -232,6 +289,9 @@ bool FlightControlConfig::Commit()
         mixerServos.add(m_mixerOutputServo[output]);
     }
     copyArray(m_orientation, doc["orientation"].to<JsonArray>());
+    copyArray(m_gyroBias, doc["gyro_bias"].to<JsonArray>());
+    copyArray(m_accelBias, doc["accel_bias"].to<JsonArray>());
+    copyArray(m_accelScale, doc["accel_scale"].to<JsonArray>());
     JsonArray pwmOutputLimits = doc["pwm_output_limits"].to<JsonArray>();
     for (uint8_t output = 0; output < FC_PWM_OUTPUT_MAX_COUNT; ++output)
     {
@@ -357,6 +417,55 @@ void FlightControlConfig::SetArmMode(bool enabled)
     }
 }
 
+void FlightControlConfig::SetWifiCoexistEnabled(bool enabled)
+{
+    if (m_wifiCoexistEnabled != enabled)
+    {
+        m_wifiCoexistEnabled = enabled;
+        m_modified = true;
+    }
+}
+
+void FlightControlConfig::SetAngleRateLimitDps(uint8_t axis, int valueDps)
+{
+    if (axis >= FC_ANGLE_RATE_LIMIT_AXIS_COUNT)
+    {
+        return;
+    }
+    const uint16_t clippedValue = (uint16_t)constrain(
+        valueDps,
+        (int)FC_ANGLE_RATE_LIMIT_MIN_DPS,
+        (int)FC_ANGLE_RATE_LIMIT_MAX_DPS);
+    if (m_angleRateLimitDps[axis] != clippedValue)
+    {
+        m_angleRateLimitDps[axis] = clippedValue;
+        m_modified = true;
+    }
+}
+
+void FlightControlConfig::SetWifiCoexistChannel(uint8_t channel)
+{
+    const uint8_t clippedChannel = constrain(channel, FC_MODE_CHANNEL_MIN, FC_MODE_CHANNEL_MAX);
+    if (m_wifiCoexistChannel != clippedChannel)
+    {
+        m_wifiCoexistChannel = clippedChannel;
+        m_modified = true;
+    }
+}
+
+void FlightControlConfig::SetWifiCoexistRange(uint16_t startUs, uint16_t endUs)
+{
+    FlightControlChannelRange range = {
+        (uint16_t)constrain(startUs, FC_CHANNEL_RANGE_MIN_US, FC_CHANNEL_RANGE_MAX_US),
+        (uint16_t)constrain(endUs, FC_CHANNEL_RANGE_MIN_US, FC_CHANNEL_RANGE_MAX_US),
+    };
+    if (memcmp(&m_wifiCoexistRange, &range, sizeof(range)) != 0)
+    {
+        m_wifiCoexistRange = range;
+        m_modified = true;
+    }
+}
+
 void FlightControlConfig::SetArmChannel(uint8_t channel)
 {
     const uint8_t clippedChannel = constrain(channel, FC_MODE_CHANNEL_MIN, FC_MODE_CHANNEL_MAX);
@@ -409,6 +518,45 @@ void FlightControlConfig::SetOrientation(const float *values, uint8_t count)
         memcpy(m_orientation, values, sizeof(m_orientation));
         m_modified = true;
     }
+}
+
+static bool setImuVector(float *target, const float *values, uint8_t count, bool positiveOnly)
+{
+    if (!values || count < FC_IMU_AXIS_COUNT) return false;
+    float next[FC_IMU_AXIS_COUNT];
+    for (uint8_t axis = 0; axis < FC_IMU_AXIS_COUNT; ++axis)
+    {
+        next[axis] = values[axis];
+        if (!isfinite(next[axis]) || (positiveOnly && (next[axis] <= 0.5f || next[axis] >= 1.5f))) return false;
+    }
+    if (memcmp(target, next, sizeof(next)) == 0) return false;
+    memcpy(target, next, sizeof(next));
+    return true;
+}
+
+void FlightControlConfig::SetGyroBias(const float *values, uint8_t count)
+{
+    if (!values || count < FC_IMU_AXIS_COUNT) return;
+    for (uint8_t axis = 0; axis < FC_IMU_AXIS_COUNT; ++axis)
+    {
+        if (!isfinite(values[axis]) || fabsf(values[axis]) > 100.0f) return;
+    }
+    if (setImuVector(m_gyroBias, values, count, false)) m_modified = true;
+}
+
+void FlightControlConfig::SetAccelBias(const float *values, uint8_t count)
+{
+    if (!values || count < FC_IMU_AXIS_COUNT) return;
+    for (uint8_t axis = 0; axis < FC_IMU_AXIS_COUNT; ++axis)
+    {
+        if (!isfinite(values[axis]) || fabsf(values[axis]) > 20.0f) return;
+    }
+    if (setImuVector(m_accelBias, values, count, false)) m_modified = true;
+}
+
+void FlightControlConfig::SetAccelScale(const float *values, uint8_t count)
+{
+    if (setImuVector(m_accelScale, values, count, true)) m_modified = true;
 }
 
 void FlightControlConfig::SetPwmOutputLimits(uint8_t output, uint16_t minUs, uint16_t centerUs, uint16_t maxUs)

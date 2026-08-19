@@ -37,7 +37,11 @@
 #define MSP_ELRS_BACKPACK_CONFIG_TLM_MODE   0x31
 
 // ELRS RX flight-control debug opcodes (MSP v2 native over WiFi TCP)
+// Legacy combined attitude response retained for configurator v0.1.7 and older.
 #define MSP_ELRS_FC_DEBUG                   0x0450
+#define MSP_ELRS_FC_PID_DEBUG               0x0451
+#define MSP_ELRS_FC_IMU_DEBUG               0x0452
+#define MSP_ELRS_FC_ATTITUDE_DEBUG          0x0455
 
 // CRSF encapsulated msp defines
 #define ENCAPSULATED_MSP_HEADER_CRC_LEN     4

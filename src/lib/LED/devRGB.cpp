@@ -1,6 +1,9 @@
 #include "targets.h"
 #include "common.h"
 #include "devLED.h"
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+#include "devWIFI.h"
+#endif
 #include "config.h"
 
 #ifdef HAS_RGB
@@ -286,6 +289,7 @@ constexpr uint8_t LEDSEQ_NO_CROSSFIRE[] = {  10, 100 }; // 1 blink, 1s pause (on
 constexpr uint8_t LEDSEQ_BINDING[] = { 10, 10, 10, 100 };   // 2x 100ms blink, 1s pause
 constexpr uint8_t LEDSEQ_MODEL_MISMATCH[] = { 10, 10, 10, 10, 10, 100 };   // 3x 100ms blink, 1s pause
 constexpr uint8_t LEDSEQ_UPDATE[] = { 20, 5, 5, 5, 5, 40 };   // 200ms on, 2x 50ms off/on, 400ms off
+constexpr uint8_t LEDSEQ_WIFI_COEXIST[] = { 5, 5, 5, 5, 30, 70 }; // short, short, long, pause
 
 #define NORMAL_UPDATE_INTERVAL 50
 
@@ -462,6 +466,14 @@ static int timeout()
                 blinkyColor.h = 10;
                 return flashLED(blinkyColor, 192, 0, LEDSEQ_MODEL_MISMATCH, sizeof(LEDSEQ_MODEL_MISMATCH));
             }
+            #if defined(HAS_BASIC_FLIGHT_CONTROL)
+            if (isFlightControlWifiCoexist())
+            {
+                blinkyColor.h = 128; // Cyan distinguishes coexistence from RF and WiFi-update states.
+                return flashLED(blinkyColor, 192, 0,
+                    LEDSEQ_WIFI_COEXIST, sizeof(LEDSEQ_WIFI_COEXIST));
+            }
+            #endif
         #endif
         // Set the color and we're done!
         blinkyColor.h = ExpressLRS_currAirRate_Modparams->index * 256 / RATE_MAX;

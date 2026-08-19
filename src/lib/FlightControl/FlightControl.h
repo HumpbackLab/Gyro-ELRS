@@ -22,6 +22,10 @@ private:
     FlightControlAttitude _attitude = {};
     FlightControlAttitude _accelAttitude = {};
     bool _attitudeValid = false;
+    float _quatW = 1.0f;
+    float _quatX = 0.0f;
+    float _quatY = 0.0f;
+    float _quatZ = 0.0f;
 };
 
 class FlightControlPid {
@@ -87,6 +91,8 @@ private:
     void loadStickTargets(float &throttle, float &rollAngle, float &pitchAngle, float &yawRate);
     FlightControlMode readModeSwitch() const;
     void resetPidState();
+    void resetControlState();
+    bool readTransformedImu(FlightControlImuSample &sample, float dt);
     void filterGyro(FlightControlImuSample &sample, float dt);
 
     FlightControlSensorBackend _sensors;
@@ -101,6 +107,7 @@ private:
     FlightControlOrientation _orientation;
     FlightControlMixerOutput _mixerOutput = {};
     FlightControlImuSample _lastImuSample = {};
+    FlightControlVector3 _lastFilteredGyroDps = {};
     FlightControlVector3 _filteredGyroDps = {};
     uint32_t _lastDebugUpdateMs = 0;
     uint16_t _lastUpdateDtUs = 0;
@@ -112,6 +119,12 @@ private:
     bool _gyroFilterInitialized = false;
     uint8_t _gyroFilterHz = 0;
     FlightControlMode _mode = FLIGHT_CONTROL_MODE_MANUAL;
+    float _rollAngleTarget = 0.0f;
+    float _pitchAngleTarget = 0.0f;
+    float _rollRateTarget = 0.0f;
+    float _pitchRateTarget = 0.0f;
+    float _yawRateTarget = 0.0f;
+    bool _armed = false;
 };
 
 #endif

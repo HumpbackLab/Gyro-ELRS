@@ -4,6 +4,9 @@
 
 #include "crsf_protocol.h"
 #include "POWERMGNT.h"
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+#include "devWIFI.h"
+#endif
 
 #ifdef HAS_LED
 
@@ -44,6 +47,8 @@ constexpr uint8_t LEDSEQ_WIFI_UPDATE[] = { 2, 3 };     // 20ms on, 30ms off
 constexpr uint8_t LEDSEQ_BINDING[] = { 10, 10, 10, 100 };   // 2x 100ms blink, 1s pause
 constexpr uint8_t LEDSEQ_MODEL_MISMATCH[] = { 10, 10, 10, 10, 10, 100 };   // 3x 100ms blink, 1s pause
 constexpr uint8_t LEDSEQ_UPDATE[] = { 20, 5, 5, 5, 5, 40 };   // 200ms on, 2x 50ms off/on, 400ms off
+// Coexistence: two short flashes followed by one long flash and a pause.
+constexpr uint8_t LEDSEQ_WIFI_COEXIST[] = { 5, 5, 5, 5, 30, 70 };
 
 static uint8_t _pin = -1;
 static uint8_t _pin_inverted;
@@ -198,6 +203,13 @@ static int event()
             }
         #endif
         #if defined(TARGET_RX)
+            #if defined(HAS_BASIC_FLIGHT_CONTROL)
+            if (isFlightControlWifiCoexist() && GPIO_PIN_LED != UNDEF_PIN)
+            {
+                return flashLED(GPIO_PIN_LED, GPIO_LED_RED_INVERTED,
+                    LEDSEQ_WIFI_COEXIST, sizeof(LEDSEQ_WIFI_COEXIST));
+            }
+            #endif
             if (GPIO_PIN_LED_GREEN != UNDEF_PIN)
             {
                 digitalWrite(GPIO_PIN_LED_GREEN, HIGH ^ GPIO_LED_GREEN_INVERTED);

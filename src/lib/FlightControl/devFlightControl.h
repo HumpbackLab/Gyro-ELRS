@@ -37,6 +37,7 @@ struct FlightControlMixerOutput {
 
 struct FlightControlDebugSnapshot {
     FlightControlImuSample imu;
+    FlightControlVector3 filteredGyroDps;
     FlightControlAttitude attitude;
     FlightControlAttitude accelAttitude;
     FlightControlMixerOutput mixerOutput;
@@ -49,6 +50,14 @@ struct FlightControlDebugSnapshot {
     bool pidReady;
     FlightControlMode mode;
     bool attitudeValid;
+    float rollAngleTarget;
+    float pitchAngleTarget;
+    float rollAngleState;
+    float pitchAngleState;
+    float rollRateTarget;
+    float pitchRateTarget;
+    float yawRateTarget;
+    bool armed;
 };
 
 const FlightControlAttitude &flightControlGetAttitude();

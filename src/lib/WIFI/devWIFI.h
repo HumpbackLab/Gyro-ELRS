@@ -6,5 +6,10 @@
 #include "devButton.h"
 
 extern device_t WIFI_device;
+void setWifiUpdateMode();
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+void setFlightControlWifiCoexist(bool enabled);
+bool isFlightControlWifiCoexist();
+#endif
 #define HAS_WIFI
 #endif
