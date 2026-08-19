@@ -79,6 +79,12 @@ static void appendU16(uint8_t *payload, uint16_t &offset, uint16_t value)
     payload[offset++] = value >> 8;
 }
 
+static void appendU32(uint8_t *payload, uint16_t &offset, uint32_t value)
+{
+    appendU16(payload, offset, value & 0xFFFF);
+    appendU16(payload, offset, value >> 16);
+}
+
 static void appendI16(uint8_t *payload, uint16_t &offset, int16_t value)
 {
     appendU16(payload, offset, (uint16_t)value);
@@ -97,7 +103,8 @@ static bool handleLocalMspRequest(uint16_t function,
     (void)requestPayload;
     (void)requestPayloadLen;
 
-    if (function != MSP_ELRS_FC_DEBUG || responseCapacity < 10)
+    static constexpr uint16_t FC_DEBUG_PAYLOAD_SIZE = 40;
+    if (function != MSP_ELRS_FC_DEBUG || responseCapacity < FC_DEBUG_PAYLOAD_SIZE)
     {
         return false;
     }
@@ -111,6 +118,21 @@ static bool handleLocalMspRequest(uint16_t function,
     appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.attitude.yawDeg, 100.0f));
     appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.accelAttitude.rollDeg, 100.0f));
     appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.accelAttitude.pitchDeg, 100.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.x, 100.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.y, 100.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.z, 100.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.accelMps2.x, 1000.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.accelMps2.y, 1000.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.accelMps2.z, 1000.0f));
+    responsePayload[responsePayloadLen++] = (uint8_t)snapshot.mode;
+    responsePayload[responsePayloadLen++] = snapshot.armed ? 1 : 0;
+    appendU32(responsePayload, responsePayloadLen, snapshot.updateTimestampMs);
+    appendU16(responsePayload, responsePayloadLen, snapshot.updateDtUs);
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.rollAngleTarget, 100.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.pitchAngleTarget, 100.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.rollRateTarget, 10.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.pitchRateTarget, 10.0f));
+    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.yawRateTarget, 10.0f));
     return true;
 }
 #endif

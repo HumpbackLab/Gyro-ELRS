@@ -51,6 +51,8 @@ struct FlightControlDebugSnapshot {
     bool attitudeValid;
     float rollAngleTarget;
     float pitchAngleTarget;
+    float rollAngleState;
+    float pitchAngleState;
     float rollRateTarget;
     float pitchRateTarget;
     float yawRateTarget;
