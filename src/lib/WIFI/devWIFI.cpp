@@ -599,14 +599,11 @@ static void GetConfiguration(AsyncWebServerRequest *request)
       condition.add(range.endUs);
     }
     JsonObject wifiConditions = configJson["fc_wifi_conditions"].to<JsonObject>();
-    const char *wifiModeKeys[] = {"rf", "coexist"};
-    for (uint8_t mode = 0; mode < FLIGHT_CONTROL_WIFI_MODE_COUNT; ++mode)
+    if (flightControlConfig.GetWifiCoexistEnabled())
     {
-      const FlightControlWifiMode wifiMode = (FlightControlWifiMode)mode;
-      if (!flightControlConfig.GetWifiModeEnabled(wifiMode)) continue;
-      JsonArray condition = wifiConditions[wifiModeKeys[mode]].to<JsonArray>();
-      condition.add(flightControlConfig.GetWifiModeChannel(wifiMode) + 1);
-      const FlightControlChannelRange &range = flightControlConfig.GetWifiModeRange(wifiMode);
+      JsonArray condition = wifiConditions["coexist"].to<JsonArray>();
+      condition.add(flightControlConfig.GetWifiCoexistChannel() + 1);
+      const FlightControlChannelRange &range = flightControlConfig.GetWifiCoexistRange();
       condition.add(range.startUs);
       condition.add(range.endUs);
     }
@@ -914,20 +911,15 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
   if (json.containsKey("fc_wifi_conditions"))
   {
     JsonObject conditions = json["fc_wifi_conditions"].as<JsonObject>();
-    const char *wifiModeKeys[] = {"rf", "coexist"};
-    for (uint8_t mode = 0; mode < FLIGHT_CONTROL_WIFI_MODE_COUNT; ++mode)
+    JsonArray condition = conditions["coexist"].as<JsonArray>();
+    flightControlConfig.SetWifiCoexistEnabled(condition.size() >= 3);
+    if (condition.size() >= 3)
     {
-      JsonArray condition = conditions[wifiModeKeys[mode]].as<JsonArray>();
-      const FlightControlWifiMode wifiMode = (FlightControlWifiMode)mode;
-      flightControlConfig.SetWifiModeEnabled(wifiMode, condition.size() >= 3);
-      if (condition.size() >= 3)
-      {
-        const int channel = condition[0] | (FC_WIFI_CHANNEL_DEFAULT + 1);
-        flightControlConfig.SetWifiModeChannel(wifiMode,
-          (uint8_t)constrain(channel - 1, FC_MODE_CHANNEL_MIN, FC_MODE_CHANNEL_MAX));
-        flightControlConfig.SetWifiModeRange(wifiMode,
-          condition[1].as<uint16_t>(), condition[2].as<uint16_t>());
-      }
+      const int channel = condition[0] | (FC_WIFI_CHANNEL_DEFAULT + 1);
+      flightControlConfig.SetWifiCoexistChannel(
+        (uint8_t)constrain(channel - 1, FC_MODE_CHANNEL_MIN, FC_MODE_CHANNEL_MAX));
+      flightControlConfig.SetWifiCoexistRange(
+        condition[1].as<uint16_t>(), condition[2].as<uint16_t>());
     }
   }
   if (json.containsKey("fc_arm_channel"))

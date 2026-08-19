@@ -21,35 +21,25 @@ static constexpr int FC_READY_RETRY_INTERVAL_MS = 100;
 static constexpr uint32_t FC_ATTITUDE_REPORT_INTERVAL_MS = 100;
 static constexpr float FC_DEGREES_TO_CRSF_ATTITUDE = PI / 180.0f * 10000.0f;
 static uint32_t lastAttitudeReportMs;
-static uint8_t wifiSwitchCandidate = 0;
-static uint8_t wifiSwitchMode = 0;
+static bool wifiSwitchCandidate = false;
+static bool wifiSwitchCoexist = false;
 static uint32_t wifiSwitchSinceMs = 0;
 
 static void updateWifiModeSwitch(uint32_t nowMs)
 {
-    // Coexistence has priority when configured ranges overlap. RF is the
-    // safe fallback when no enabled condition matches.
-    uint8_t candidate = FLIGHT_CONTROL_WIFI_MODE_RF;
-    for (int8_t mode = FLIGHT_CONTROL_WIFI_MODE_COEXIST; mode >= FLIGHT_CONTROL_WIFI_MODE_RF; --mode)
-    {
-        const FlightControlWifiMode wifiMode = (FlightControlWifiMode)mode;
-        if (!flightControlConfig.GetWifiModeEnabled(wifiMode)) continue;
-        const uint8_t channel = flightControlConfig.GetWifiModeChannel(wifiMode);
-        if (FlightControlRangeIsActive(flightControlConfig.GetWifiModeRange(wifiMode), CRSF_to_US(ChannelData[channel])))
-        {
-            candidate = mode;
-            break;
-        }
-    }
+    // RF is the safe fallback; coexistence is the only configurable condition.
+    const uint8_t channel = flightControlConfig.GetWifiCoexistChannel();
+    const bool candidate = flightControlConfig.GetWifiCoexistEnabled() &&
+        FlightControlRangeIsActive(flightControlConfig.GetWifiCoexistRange(), CRSF_to_US(ChannelData[channel]));
     // Stabilize the selected condition for 300 ms before acting.
     if (candidate != wifiSwitchCandidate) {
         wifiSwitchCandidate = candidate;
         wifiSwitchSinceMs = nowMs;
         return;
     }
-    if (candidate == wifiSwitchMode || (uint32_t)(nowMs - wifiSwitchSinceMs) < 300) return;
-    wifiSwitchMode = candidate;
-    setFlightControlWifiCoexist(candidate == FLIGHT_CONTROL_WIFI_MODE_COEXIST);
+    if (candidate == wifiSwitchCoexist || (uint32_t)(nowMs - wifiSwitchSinceMs) < 300) return;
+    wifiSwitchCoexist = candidate;
+    setFlightControlWifiCoexist(candidate);
 }
 
 extern Telemetry telemetry;

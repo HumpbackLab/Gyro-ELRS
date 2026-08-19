@@ -40,13 +40,6 @@ enum FlightControlMode : uint8_t
     FLIGHT_CONTROL_MODE_COUNT,
 };
 
-enum FlightControlWifiMode : uint8_t
-{
-    FLIGHT_CONTROL_WIFI_MODE_RF = 0,
-    FLIGHT_CONTROL_WIFI_MODE_COEXIST,
-    FLIGHT_CONTROL_WIFI_MODE_COUNT,
-};
-
 struct FlightControlChannelRange
 {
     uint16_t startUs;
@@ -79,9 +72,9 @@ public:
     bool GetModeEnabled(FlightControlMode mode) const { return mode != FLIGHT_CONTROL_MODE_MANUAL && m_modeEnabled[mode]; }
     uint8_t GetModeChannel(FlightControlMode mode) const { return m_modeChannels[mode]; }
     const FlightControlChannelRange &GetModeRange(FlightControlMode mode) const { return m_modeRanges[mode]; }
-    bool GetWifiModeEnabled(FlightControlWifiMode mode) const { return mode < FLIGHT_CONTROL_WIFI_MODE_COUNT && m_wifiModeEnabled[mode]; }
-    uint8_t GetWifiModeChannel(FlightControlWifiMode mode) const { return m_wifiModeChannels[mode]; }
-    const FlightControlChannelRange &GetWifiModeRange(FlightControlWifiMode mode) const { return m_wifiModeRanges[mode]; }
+    bool GetWifiCoexistEnabled() const { return m_wifiCoexistEnabled; }
+    uint8_t GetWifiCoexistChannel() const { return m_wifiCoexistChannel; }
+    const FlightControlChannelRange &GetWifiCoexistRange() const { return m_wifiCoexistRange; }
     bool GetArmMode() const { return m_armMode; }
     uint8_t GetArmChannel() const { return m_armChannel; }
     const FlightControlChannelRange &GetArmRange() const { return m_armRange; }
@@ -107,9 +100,9 @@ public:
     void SetModeEnabled(FlightControlMode mode, bool enabled);
     void SetModeChannel(FlightControlMode mode, uint8_t channel);
     void SetModeRange(FlightControlMode mode, uint16_t startUs, uint16_t endUs);
-    void SetWifiModeEnabled(FlightControlWifiMode mode, bool enabled);
-    void SetWifiModeChannel(FlightControlWifiMode mode, uint8_t channel);
-    void SetWifiModeRange(FlightControlWifiMode mode, uint16_t startUs, uint16_t endUs);
+    void SetWifiCoexistEnabled(bool enabled);
+    void SetWifiCoexistChannel(uint8_t channel);
+    void SetWifiCoexistRange(uint16_t startUs, uint16_t endUs);
     void SetArmMode(bool enabled);
     void SetArmChannel(uint8_t channel);
     void SetArmRange(uint16_t startUs, uint16_t endUs);
@@ -141,9 +134,9 @@ private:
     bool m_modeEnabled[FLIGHT_CONTROL_MODE_COUNT] = {};
     uint8_t m_modeChannels[FLIGHT_CONTROL_MODE_COUNT] = {};
     FlightControlChannelRange m_modeRanges[FLIGHT_CONTROL_MODE_COUNT] = {};
-    bool m_wifiModeEnabled[FLIGHT_CONTROL_WIFI_MODE_COUNT] = {};
-    uint8_t m_wifiModeChannels[FLIGHT_CONTROL_WIFI_MODE_COUNT] = {};
-    FlightControlChannelRange m_wifiModeRanges[FLIGHT_CONTROL_WIFI_MODE_COUNT] = {};
+    bool m_wifiCoexistEnabled = false;
+    uint8_t m_wifiCoexistChannel = FC_WIFI_CHANNEL_DEFAULT;
+    FlightControlChannelRange m_wifiCoexistRange = {1700, 2100};
     bool m_armMode = false;
     uint8_t m_armChannel = FC_ARM_CHANNEL_DEFAULT;
     FlightControlChannelRange m_armRange = {};
