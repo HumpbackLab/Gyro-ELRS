@@ -94,7 +94,17 @@ static bool handleLocalMspRequest(uint16_t function,
     (void)requestPayloadLen;
 
     static constexpr uint16_t FC_DEBUG_PAYLOAD_SIZE = 40;
-    if (function != MSP_ELRS_FC_DEBUG || responseCapacity < FC_DEBUG_PAYLOAD_SIZE)
+    static constexpr uint16_t FC_PID_DEBUG_PAYLOAD_SIZE = 28;
+    static constexpr uint16_t FC_IMU_DEBUG_PAYLOAD_SIZE = 18;
+    // Keep the original combined response wire-compatible with released
+    // configurator v0.1.7; new clients use the split PID and IMU requests.
+    const bool legacyDebug = function == MSP_ELRS_FC_DEBUG;
+    const bool pidDebug = function == MSP_ELRS_FC_PID_DEBUG;
+    const bool imuDebug = function == MSP_ELRS_FC_IMU_DEBUG;
+    const uint16_t requiredCapacity = legacyDebug ? FC_DEBUG_PAYLOAD_SIZE
+        : pidDebug ? FC_PID_DEBUG_PAYLOAD_SIZE
+        : imuDebug ? FC_IMU_DEBUG_PAYLOAD_SIZE : 0;
+    if (requiredCapacity == 0 || responseCapacity < requiredCapacity)
     {
         return false;
     }
@@ -103,26 +113,45 @@ static bool handleLocalMspRequest(uint16_t function,
     flightControlGetDebugSnapshot(snapshot);
 
     responsePayloadLen = 0;
-    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.attitude.rollDeg, 100.0f));
-    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.attitude.pitchDeg, 100.0f));
-    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.attitude.yawDeg, 100.0f));
-    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.accelAttitude.rollDeg, 100.0f));
-    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.accelAttitude.pitchDeg, 100.0f));
-    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.x, 100.0f));
-    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.y, 100.0f));
-    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.z, 100.0f));
-    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.accelMps2.x, 1000.0f));
-    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.accelMps2.y, 1000.0f));
-    appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.accelMps2.z, 1000.0f));
+    if (legacyDebug || imuDebug)
+    {
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.attitude.rollDeg, 100.0f));
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.attitude.pitchDeg, 100.0f));
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.attitude.yawDeg, 100.0f));
+        if (legacyDebug)
+        {
+            appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.accelAttitude.rollDeg, 100.0f));
+            appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.accelAttitude.pitchDeg, 100.0f));
+        }
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.x, 100.0f));
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.y, 100.0f));
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.z, 100.0f));
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.accelMps2.x, 1000.0f));
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.accelMps2.y, 1000.0f));
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.accelMps2.z, 1000.0f));
+        if (imuDebug) return true;
+    }
+
     responsePayload[responsePayloadLen++] = (uint8_t)snapshot.mode;
     responsePayload[responsePayloadLen++] = snapshot.armed ? 1 : 0;
     appendU32(responsePayload, responsePayloadLen, snapshot.updateTimestampMs);
     appendU16(responsePayload, responsePayloadLen, snapshot.updateDtUs);
     appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.rollAngleTarget, 100.0f));
     appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.pitchAngleTarget, 100.0f));
+    if (pidDebug)
+    {
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.rollAngleState, 100.0f));
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.pitchAngleState, 100.0f));
+    }
     appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.rollRateTarget, 10.0f));
     appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.pitchRateTarget, 10.0f));
     appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.yawRateTarget, 10.0f));
+    if (pidDebug)
+    {
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.x, 100.0f));
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.y, 100.0f));
+        appendI16(responsePayload, responsePayloadLen, scaledFloatToI16(snapshot.imu.gyroDps.z, 100.0f));
+    }
     return true;
 }
 #endif
