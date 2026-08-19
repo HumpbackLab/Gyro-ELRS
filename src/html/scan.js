@@ -539,9 +539,12 @@ function fileSelectHandler(e) {
   }
 }
 
-function uploadFile(file) {
+async function uploadFile(file) {
   _('upload_btn').disabled = true
   try {
+    _('status').innerHTML = 'Calculating firmware integrity checksum...';
+    const digest = md5(new Uint8Array(await file.arrayBuffer()));
+    const digestHex = Array.from(digest, value => value.toString(16).padStart(2, '0')).join('');
     const formdata = new FormData();
     formdata.append('upload', file, file.name);
     const ajax = new XMLHttpRequest();
@@ -551,10 +554,17 @@ function uploadFile(file) {
     ajax.addEventListener('abort', abortHandler, false);
     ajax.open('POST', '/update');
     ajax.setRequestHeader('X-FileSize', file.size);
+    ajax.setRequestHeader('X-File-MD5', digestHex);
     ajax.send(formdata);
   }
   catch (e) {
     _('upload_btn').disabled = false
+    _('status').innerHTML = '';
+    cuteAlert({
+      type: 'error',
+      title: 'Update Failed',
+      message: `Unable to prepare firmware upload: ${e.message || e}`
+    });
   }
 }
 
@@ -571,30 +581,11 @@ function completeHandler(event) {
   _('upload_btn').disabled = false
   const data = JSON.parse(event.target.responseText);
   if (data.status === 'ok') {
-    function showMessage() {
-      cuteAlert({
-        type: 'success',
-        title: 'Update Succeeded',
-        message: data.msg
-      });
-    }
-    // This is basically a delayed display of the success dialog with a fake progress
-    let percent = 0;
-    const interval = setInterval(()=>{
-@@if (is8285):
-      percent = percent + 1;
-@@else:
-      percent = percent + 2;
-@@end
-      _('progressBar').value = percent;
-      _('status').innerHTML = percent + '% flashed... please wait';
-      if (percent === 100) {
-        clearInterval(interval);
-        _('status').innerHTML = '';
-        _('progressBar').value = 0;
-        showMessage();
-      }
-    }, 100);
+    cuteAlert({
+      type: 'success',
+      title: 'Update Succeeded',
+      message: data.msg
+    });
   } else if (data.status === 'mismatch') {
     cuteAlert({
       type: 'question',
@@ -1047,20 +1038,31 @@ md5 = function() {
     k[i] = 0 | (Math.abs(Math.sin(++i)) * 4294967296);
   }
 
-  function calcMD5(str) {
+  function calcMD5(input) {
     let b; let c; let d; let j;
     const x = [];
-    const str2 = unescape(encodeURI(str));
-    let a = str2.length;
+    let bytes;
+    if (typeof input === 'string') {
+      const encoded = unescape(encodeURI(input));
+      bytes = new Uint8Array(encoded.length);
+      for (let n = 0; n < encoded.length; ++n) bytes[n] = encoded.charCodeAt(n);
+    } else if (input instanceof Uint8Array) {
+      bytes = input;
+    } else {
+      bytes = new Uint8Array(input);
+    }
+    let a = bytes.length;
     const h = [b = 1732584193, c = -271733879, ~b, ~c];
     let i = 0;
 
-    for (; i <= a;) x[i >> 2] |= (str2.charCodeAt(i) || 128) << 8 * (i++ % 4);
+    for (; i < a; ++i) x[i >> 2] |= bytes[i] << 8 * (i % 4);
+    x[i >> 2] |= 128 << 8 * (i % 4);
 
-    x[str = (a + 8 >> 6) * 16 + 14] = a * 8;
+    const wordCount = (a + 8 >> 6) * 16 + 14;
+    x[wordCount] = a * 8;
     i = 0;
 
-    for (; i < str; i += 16) {
+    for (; i < wordCount; i += 16) {
       a = h; j = 0;
       for (; j < 64;) {
         a = [
@@ -1097,10 +1099,10 @@ md5 = function() {
       for (j = 4; j;) h[--j] = h[j] + a[j];
     }
 
-    str = [];
-    for (; j < 32;) str.push(((h[j >> 3] >> ((1 ^ j++ & 7) * 4)) & 15) * 16 + ((h[j >> 3] >> ((1 ^ j++ & 7) * 4)) & 15));
+    const result = [];
+    for (; j < 32;) result.push(((h[j >> 3] >> ((1 ^ j++ & 7) * 4)) & 15) * 16 + ((h[j >> 3] >> ((1 ^ j++ & 7) * 4)) & 15));
 
-    return new Uint8Array(str);
+    return new Uint8Array(result);
   }
   return calcMD5;
 }();
