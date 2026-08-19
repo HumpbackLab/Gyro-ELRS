@@ -83,6 +83,8 @@ static char station_ssid[33];
 static char station_password[65];
 
 static bool wifiStarted = false;
+static bool flightControlWifiCoexist = false;
+static bool flightControlWifiSwitchOnly = false;
 bool webserverPreventAutoStart = false;
 
 static wl_status_t laststatus = WL_IDLE_STATUS;
@@ -535,6 +537,18 @@ static void GetConfiguration(AsyncWebServerRequest *request)
       condition.add(range.startUs);
       condition.add(range.endUs);
     }
+    JsonObject wifiConditions = configJson["fc_wifi_conditions"].to<JsonObject>();
+    const char *wifiModeKeys[] = {"rf", "wifi", "coexist"};
+    for (uint8_t mode = 0; mode < FLIGHT_CONTROL_WIFI_MODE_COUNT; ++mode)
+    {
+      const FlightControlWifiMode wifiMode = (FlightControlWifiMode)mode;
+      if (!flightControlConfig.GetWifiModeEnabled(wifiMode)) continue;
+      JsonArray condition = wifiConditions[wifiModeKeys[mode]].to<JsonArray>();
+      condition.add(flightControlConfig.GetWifiModeChannel(wifiMode) + 1);
+      const FlightControlChannelRange &range = flightControlConfig.GetWifiModeRange(wifiMode);
+      condition.add(range.startUs);
+      condition.add(range.endUs);
+    }
     FlightControlRangeToJson(configJson["fc_arm_range"].to<JsonArray>(), flightControlConfig.GetArmRange());
     FlightControlPidToJson(configJson, "fc_rate_pid", flightControlConfig.GetRatePid());
     FlightControlPidToJson(configJson, "fc_angle_pid", flightControlConfig.GetAnglePid());
@@ -801,6 +815,25 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
   if (json.containsKey("fc_arm_enabled"))
   {
     flightControlConfig.SetArmMode(json["fc_arm_enabled"] | false);
+  }
+  if (json.containsKey("fc_wifi_conditions"))
+  {
+    JsonObject conditions = json["fc_wifi_conditions"].as<JsonObject>();
+    const char *wifiModeKeys[] = {"rf", "wifi", "coexist"};
+    for (uint8_t mode = 0; mode < FLIGHT_CONTROL_WIFI_MODE_COUNT; ++mode)
+    {
+      JsonArray condition = conditions[wifiModeKeys[mode]].as<JsonArray>();
+      const FlightControlWifiMode wifiMode = (FlightControlWifiMode)mode;
+      flightControlConfig.SetWifiModeEnabled(wifiMode, condition.size() >= 3);
+      if (condition.size() >= 3)
+      {
+        const int channel = condition[0] | (FC_WIFI_CHANNEL_DEFAULT + 1);
+        flightControlConfig.SetWifiModeChannel(wifiMode,
+          (uint8_t)constrain(channel - 1, FC_MODE_CHANNEL_MIN, FC_MODE_CHANNEL_MAX));
+        flightControlConfig.SetWifiModeRange(wifiMode,
+          condition[1].as<uint16_t>(), condition[2].as<uint16_t>());
+      }
+    }
   }
   if (json.containsKey("fc_arm_channel"))
   {
@@ -1245,7 +1278,7 @@ static void startWiFi(unsigned long now)
     return;
   }
 
-  if (connectionState < FAILURE_STATES) {
+  if (connectionState < FAILURE_STATES && !flightControlWifiCoexist) {
     hwTimer::stop();
 
 #ifdef HAS_VTX_SPI
@@ -1268,7 +1301,9 @@ static void startWiFi(unsigned long now)
   WiFi.mode(WIFI_OFF);
   strcpy(station_ssid, firmwareOptions.home_wifi_ssid);
   strcpy(station_password, firmwareOptions.home_wifi_password);
-  if (station_ssid[0] == 0) {
+  // Both CH7 WiFi positions keep ELRS running. Always expose the RX access
+  // point immediately so the device remains directly discoverable.
+  if (flightControlWifiCoexist || station_ssid[0] == 0) {
     changeTime = now;
     changeMode = WIFI_AP;
   }
@@ -1603,7 +1638,7 @@ static int start()
 
 static int event()
 {
-  if (connectionState == wifiUpdate || connectionState > FAILURE_STATES)
+  if (connectionState == wifiUpdate || connectionState > FAILURE_STATES || flightControlWifiCoexist)
   {
     if (!wifiStarted) {
       startWiFi(millis());
@@ -1674,5 +1709,44 @@ device_t WIFI_device = {
   .event = event,
   .timeout = timeout
 };
+
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX) && defined(PLATFORM_ESP32)
+static void setFlightControlWifiState(bool coexist, bool switchOnly)
+{
+  if (flightControlWifiCoexist == coexist && flightControlWifiSwitchOnly == switchOnly) return;
+  flightControlWifiCoexist = coexist;
+  flightControlWifiSwitchOnly = switchOnly;
+  if (!coexist) {
+    // Tear the coexistence interface down immediately. If CH7 selected pure
+    // WiFi, the normal WiFi event will then restart it and stop the radio.
+    if (wifiStarted) {
+      wifiStarted = false;
+      WiFi.disconnect(true);
+      WiFi.mode(WIFI_OFF);
+    }
+  }
+  devicesTriggerEvent();
+}
+
+void setFlightControlWifiCoexist(bool enabled)
+{
+  setFlightControlWifiState(enabled, false);
+}
+
+bool isFlightControlWifiCoexist()
+{
+  return flightControlWifiCoexist;
+}
+
+void setFlightControlWifiSwitchOnly(bool enabled)
+{
+  setFlightControlWifiState(enabled, enabled);
+}
+
+bool isFlightControlWifiSwitchOnly()
+{
+  return flightControlWifiSwitchOnly;
+}
+#endif
 
 #endif

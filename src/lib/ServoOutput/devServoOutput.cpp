@@ -196,6 +196,15 @@ static void servosUpdate(unsigned long now)
 {
     static uint32_t lastUpdate;
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+    if (flightControlWifiSwitchOnlyActive())
+    {
+        // RF packets continue arriving so CH7 can exit WiFi, but no received
+        // channel is allowed to drive an output in this mode.
+        newChannelsAvailable = false;
+        servosFailsafe();
+        lastUpdate = 0;
+        return;
+    }
     if (connectionState == wifiUpdate)
     {
         const bool outputEnabled = flightControlConfig.GetPwmOutputWifiEnabled();

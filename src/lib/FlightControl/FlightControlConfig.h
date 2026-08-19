@@ -16,6 +16,7 @@ constexpr uint8_t FC_MODE_CHANNEL_MIN = 4; // CH5, zero-based
 constexpr uint8_t FC_MODE_CHANNEL_MAX = 15; // CH16, zero-based
 constexpr uint8_t FC_MODE_CHANNEL_DEFAULT = 5; // CH6, zero-based
 constexpr uint8_t FC_ARM_CHANNEL_DEFAULT = 4; // CH5, zero-based
+constexpr uint8_t FC_WIFI_CHANNEL_DEFAULT = 6; // CH7, zero-based
 constexpr uint16_t FC_CHANNEL_RANGE_MIN_US = 900;
 constexpr uint16_t FC_CHANNEL_RANGE_MAX_US = 2100;
 constexpr uint16_t FC_PWM_LIMIT_MIN_US = 500;
@@ -36,6 +37,14 @@ enum FlightControlMode : uint8_t
     FLIGHT_CONTROL_MODE_RATE,
     FLIGHT_CONTROL_MODE_ANGLE,
     FLIGHT_CONTROL_MODE_COUNT,
+};
+
+enum FlightControlWifiMode : uint8_t
+{
+    FLIGHT_CONTROL_WIFI_MODE_RF = 0,
+    FLIGHT_CONTROL_WIFI_MODE_WIFI,
+    FLIGHT_CONTROL_WIFI_MODE_COEXIST,
+    FLIGHT_CONTROL_WIFI_MODE_COUNT,
 };
 
 struct FlightControlChannelRange
@@ -70,6 +79,9 @@ public:
     bool GetModeEnabled(FlightControlMode mode) const { return mode != FLIGHT_CONTROL_MODE_MANUAL && m_modeEnabled[mode]; }
     uint8_t GetModeChannel(FlightControlMode mode) const { return m_modeChannels[mode]; }
     const FlightControlChannelRange &GetModeRange(FlightControlMode mode) const { return m_modeRanges[mode]; }
+    bool GetWifiModeEnabled(FlightControlWifiMode mode) const { return mode < FLIGHT_CONTROL_WIFI_MODE_COUNT && m_wifiModeEnabled[mode]; }
+    uint8_t GetWifiModeChannel(FlightControlWifiMode mode) const { return m_wifiModeChannels[mode]; }
+    const FlightControlChannelRange &GetWifiModeRange(FlightControlWifiMode mode) const { return m_wifiModeRanges[mode]; }
     bool GetArmMode() const { return m_armMode; }
     uint8_t GetArmChannel() const { return m_armChannel; }
     const FlightControlChannelRange &GetArmRange() const { return m_armRange; }
@@ -92,6 +104,9 @@ public:
     void SetModeEnabled(FlightControlMode mode, bool enabled);
     void SetModeChannel(FlightControlMode mode, uint8_t channel);
     void SetModeRange(FlightControlMode mode, uint16_t startUs, uint16_t endUs);
+    void SetWifiModeEnabled(FlightControlWifiMode mode, bool enabled);
+    void SetWifiModeChannel(FlightControlWifiMode mode, uint8_t channel);
+    void SetWifiModeRange(FlightControlWifiMode mode, uint16_t startUs, uint16_t endUs);
     void SetArmMode(bool enabled);
     void SetArmChannel(uint8_t channel);
     void SetArmRange(uint16_t startUs, uint16_t endUs);
@@ -117,6 +132,9 @@ private:
     bool m_modeEnabled[FLIGHT_CONTROL_MODE_COUNT] = {};
     uint8_t m_modeChannels[FLIGHT_CONTROL_MODE_COUNT] = {};
     FlightControlChannelRange m_modeRanges[FLIGHT_CONTROL_MODE_COUNT] = {};
+    bool m_wifiModeEnabled[FLIGHT_CONTROL_WIFI_MODE_COUNT] = {};
+    uint8_t m_wifiModeChannels[FLIGHT_CONTROL_WIFI_MODE_COUNT] = {};
+    FlightControlChannelRange m_wifiModeRanges[FLIGHT_CONTROL_WIFI_MODE_COUNT] = {};
     bool m_armMode = false;
     uint8_t m_armChannel = FC_ARM_CHANNEL_DEFAULT;
     FlightControlChannelRange m_armRange = {};

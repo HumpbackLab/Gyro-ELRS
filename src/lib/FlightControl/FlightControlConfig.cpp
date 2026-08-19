@@ -45,6 +45,14 @@ void FlightControlConfig::SetDefaults()
     }
     m_modeRanges[FLIGHT_CONTROL_MODE_RATE] = {1300, 1700};
     m_modeRanges[FLIGHT_CONTROL_MODE_ANGLE] = {1700, 2100};
+    for (uint8_t mode = 0; mode < FLIGHT_CONTROL_WIFI_MODE_COUNT; ++mode)
+    {
+        m_wifiModeEnabled[mode] = true;
+        m_wifiModeChannels[mode] = FC_WIFI_CHANNEL_DEFAULT;
+    }
+    m_wifiModeRanges[FLIGHT_CONTROL_WIFI_MODE_RF] = {900, 1300};
+    m_wifiModeRanges[FLIGHT_CONTROL_WIFI_MODE_WIFI] = {1300, 1700};
+    m_wifiModeRanges[FLIGHT_CONTROL_WIFI_MODE_COEXIST] = {1700, 2100};
     m_armMode = false;
     m_armChannel = FC_ARM_CHANNEL_DEFAULT;
     m_armRange = {1700, 2100};
@@ -144,6 +152,23 @@ void FlightControlConfig::Load()
             }
         }
     }
+    JsonObject wifiConditions = doc["wifi_conditions"].as<JsonObject>();
+    if (!wifiConditions.isNull())
+    {
+        const char *keys[] = {"rf", "wifi", "coexist"};
+        for (uint8_t mode = 0; mode < FLIGHT_CONTROL_WIFI_MODE_COUNT; ++mode)
+        {
+            JsonArray condition = wifiConditions[keys[mode]].as<JsonArray>();
+            SetWifiModeEnabled((FlightControlWifiMode)mode, condition.size() >= 3);
+            if (condition.size() >= 3)
+            {
+                const int channel = condition[0].as<int>();
+                SetWifiModeChannel((FlightControlWifiMode)mode,
+                    (uint8_t)constrain(channel - 1, FC_MODE_CHANNEL_MIN, FC_MODE_CHANNEL_MAX));
+                SetWifiModeRange((FlightControlWifiMode)mode, condition[1].as<uint16_t>(), condition[2].as<uint16_t>());
+            }
+        }
+    }
     m_armMode = doc["arm_enabled"] | false;
     const int armChannel = doc["arm_channel"] | (FC_ARM_CHANNEL_DEFAULT + 1);
     m_armChannel = (uint8_t)constrain(armChannel - 1, FC_MODE_CHANNEL_MIN, FC_MODE_CHANNEL_MAX);
@@ -219,6 +244,16 @@ bool FlightControlConfig::Commit()
         condition.add(m_modeChannels[mode] + 1);
         condition.add(m_modeRanges[mode].startUs);
         condition.add(m_modeRanges[mode].endUs);
+    }
+    JsonObject wifiConditions = doc["wifi_conditions"].to<JsonObject>();
+    const char *wifiKeys[] = {"rf", "wifi", "coexist"};
+    for (uint8_t mode = 0; mode < FLIGHT_CONTROL_WIFI_MODE_COUNT; ++mode)
+    {
+        if (!m_wifiModeEnabled[mode]) continue;
+        JsonArray condition = wifiConditions[wifiKeys[mode]].to<JsonArray>();
+        condition.add(m_wifiModeChannels[mode] + 1);
+        condition.add(m_wifiModeRanges[mode].startUs);
+        condition.add(m_wifiModeRanges[mode].endUs);
     }
     doc["arm_enabled"] = m_armMode;
     doc["arm_channel"] = m_armChannel + 1;
@@ -353,6 +388,41 @@ void FlightControlConfig::SetArmMode(bool enabled)
     if (m_armMode != enabled)
     {
         m_armMode = enabled;
+        m_modified = true;
+    }
+}
+
+void FlightControlConfig::SetWifiModeEnabled(FlightControlWifiMode mode, bool enabled)
+{
+    if (mode >= FLIGHT_CONTROL_WIFI_MODE_COUNT) return;
+    if (m_wifiModeEnabled[mode] != enabled)
+    {
+        m_wifiModeEnabled[mode] = enabled;
+        m_modified = true;
+    }
+}
+
+void FlightControlConfig::SetWifiModeChannel(FlightControlWifiMode mode, uint8_t channel)
+{
+    if (mode >= FLIGHT_CONTROL_WIFI_MODE_COUNT) return;
+    const uint8_t clippedChannel = constrain(channel, FC_MODE_CHANNEL_MIN, FC_MODE_CHANNEL_MAX);
+    if (m_wifiModeChannels[mode] != clippedChannel)
+    {
+        m_wifiModeChannels[mode] = clippedChannel;
+        m_modified = true;
+    }
+}
+
+void FlightControlConfig::SetWifiModeRange(FlightControlWifiMode mode, uint16_t startUs, uint16_t endUs)
+{
+    if (mode >= FLIGHT_CONTROL_WIFI_MODE_COUNT) return;
+    FlightControlChannelRange range = {
+        (uint16_t)constrain(startUs, FC_CHANNEL_RANGE_MIN_US, FC_CHANNEL_RANGE_MAX_US),
+        (uint16_t)constrain(endUs, FC_CHANNEL_RANGE_MIN_US, FC_CHANNEL_RANGE_MAX_US),
+    };
+    if (memcmp(&m_wifiModeRanges[mode], &range, sizeof(range)) != 0)
+    {
+        m_wifiModeRanges[mode] = range;
         m_modified = true;
     }
 }

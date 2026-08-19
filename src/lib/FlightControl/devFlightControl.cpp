@@ -8,6 +8,7 @@
 #include "common.h"
 #include "crsf_protocol.h"
 #include "telemetry.h"
+#include "devWIFI.h"
 #if defined(USE_MSP_WIFI)
 #include "msptypes.h"
 #include "tcpsocket.h"
@@ -20,6 +21,42 @@ static constexpr int FC_READY_RETRY_INTERVAL_MS = 100;
 static constexpr uint32_t FC_ATTITUDE_REPORT_INTERVAL_MS = 100;
 static constexpr float FC_DEGREES_TO_CRSF_ATTITUDE = PI / 180.0f * 10000.0f;
 static uint32_t lastAttitudeReportMs;
+static uint8_t wifiSwitchCandidate = 0;
+static uint8_t wifiSwitchMode = 0;
+static uint32_t wifiSwitchSinceMs = 0;
+
+static void updateWifiModeSwitch(uint32_t nowMs)
+{
+    // Coexistence has priority when configured ranges overlap, followed by
+    // pure WiFi. RF is the safe fallback when no enabled condition matches.
+    uint8_t candidate = FLIGHT_CONTROL_WIFI_MODE_RF;
+    for (int8_t mode = FLIGHT_CONTROL_WIFI_MODE_COEXIST; mode >= FLIGHT_CONTROL_WIFI_MODE_RF; --mode)
+    {
+        const FlightControlWifiMode wifiMode = (FlightControlWifiMode)mode;
+        if (!flightControlConfig.GetWifiModeEnabled(wifiMode)) continue;
+        const uint8_t channel = flightControlConfig.GetWifiModeChannel(wifiMode);
+        if (FlightControlRangeIsActive(flightControlConfig.GetWifiModeRange(wifiMode), CRSF_to_US(ChannelData[channel])))
+        {
+            candidate = mode;
+            break;
+        }
+    }
+    // Stabilize the selected condition for 300 ms before acting.
+    if (candidate != wifiSwitchCandidate) {
+        wifiSwitchCandidate = candidate;
+        wifiSwitchSinceMs = nowMs;
+        return;
+    }
+    if (candidate == wifiSwitchMode || (uint32_t)(nowMs - wifiSwitchSinceMs) < 300) return;
+    wifiSwitchMode = candidate;
+    if (candidate == 1) {
+        // Middle position: start WiFi without stopping ELRS. While active,
+        // CH7 is the only RC input acted on so it can switch back to RF mode.
+        setFlightControlWifiSwitchOnly(true);
+    } else {
+        setFlightControlWifiCoexist(candidate == 2);
+    }
+}
 
 extern Telemetry telemetry;
 #if defined(USE_MSP_WIFI)
@@ -39,6 +76,11 @@ const FlightControlMixerOutput &flightControlGetMixerOutput()
 bool flightControlGetDebugSnapshot(FlightControlDebugSnapshot &snapshot)
 {
     return runtime.getDebugSnapshot(snapshot);
+}
+
+bool flightControlWifiSwitchOnlyActive()
+{
+    return isFlightControlWifiSwitchOnly();
 }
 
 #if defined(USE_MSP_WIFI)
@@ -164,6 +206,19 @@ static bool rcInputReady()
 
 static int timeout()
 {
+    // Always inspect CH7 while the receiver is connected, including the
+    // switch-only WiFi state. The radio remains alive in that state.
+    if (connectionState == connected && connectionHasModelMatch && teamraceHasModelMatch)
+    {
+        updateWifiModeSwitch(millis());
+    }
+
+    if (isFlightControlWifiSwitchOnly())
+    {
+        runtime.reset();
+        return 4;
+    }
+
     if (!rcInputReady())
     {
         if (connectionState == wifiUpdate)
