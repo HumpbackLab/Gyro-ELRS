@@ -256,11 +256,19 @@ static void getFile(AsyncWebServerRequest *request)
 
 static void HandleReboot(AsyncWebServerRequest *request)
 {
-  AsyncWebServerResponse *response = request->beginResponse(200, "application/json", "Kill -9, no more CPU time!");
+  #if defined(TARGET_RX)
+  // A configurator-requested restart is not a power cycle. Do not let repeated
+  // maintenance restarts contribute to the three-power-cycle binding gesture.
+  config.SetPowerOnCounter(0);
+  config.Commit();
+  #endif
+
+  AsyncWebServerResponse *response = request->beginResponse(200, "application/json", "{\"status\":\"ok\",\"rebooting\":true}");
   response->addHeader("Connection", "close");
   request->send(response);
-  request->client()->close();
-  rebootTime = millis() + 100;
+  // Give the asynchronous server enough time to flush the response. Closing
+  // the socket here can make a successful reboot look like a failed request.
+  rebootTime = millis() + 500;
 }
 
 static void HandleReset(AsyncWebServerRequest *request)
