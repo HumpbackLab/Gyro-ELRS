@@ -367,10 +367,7 @@ void FlightControlRuntime::begin()
 void FlightControlRuntime::reset()
 {
     _estimator.reset();
-    resetPidState();
-    // Preserve the configured motor count so consumers can actively drive a
-    // safe minimum output instead of retaining the last control value.
-    _mixerOutput = _mixer.mix(0.0f, 0.0f, 0.0f, 0.0f);
+    resetControlState();
     _lastImuSample = {};
     _lastFilteredGyroDps = {};
     _lastDebugUpdateMs = 0;
@@ -380,8 +377,6 @@ void FlightControlRuntime::reset()
     _filteredGyroDps = {};
     _gyroFilterInitialized = false;
     _gyroFilterHz = 0;
-    _rollAngleTarget = _pitchAngleTarget = 0.0f;
-    _rollRateTarget = _pitchRateTarget = _yawRateTarget = 0.0f;
     _armed = false;
 }
 
@@ -393,6 +388,16 @@ void FlightControlRuntime::resetPidState()
     _rollAnglePid.reset();
     _pitchAnglePid.reset();
     _yawAnglePid.reset();
+}
+
+void FlightControlRuntime::resetControlState()
+{
+    resetPidState();
+    _rollAngleTarget = _pitchAngleTarget = 0.0f;
+    _rollRateTarget = _pitchRateTarget = _yawRateTarget = 0.0f;
+    // Preserve the configured output count while immediately replacing every
+    // previous PID/mixer command with the safe motor minimum or servo center.
+    _mixerOutput = _mixer.mix(0.0f, 0.0f, 0.0f, 0.0f);
 }
 
 bool FlightControlRuntime::readTransformedImu(FlightControlImuSample &sample, float dt)
@@ -595,6 +600,26 @@ void FlightControlRuntime::update(uint32_t nowUs)
     _lastSampleAgeMs = sample.timestampMs == 0 ? 0 : (uint16_t)constrain((uint32_t)(_lastDebugUpdateMs - sample.timestampMs), 0U, 65535U);
     _estimator.update(sample, dt);
 
+    const uint8_t armChannel = flightControlConfig.GetArmChannel();
+    const bool armActive = FlightControlRangeIsActive(
+        flightControlConfig.GetArmRange(), CRSF_to_US(ChannelData[armChannel]));
+    const bool wasArmed = _armed;
+    _armed = !flightControlConfig.GetArmMode() || armActive;
+    if (!_armed)
+    {
+        // Do not run either PID loop while locked. Clearing the complete
+        // controller state here also removes the last command immediately on
+        // the armed -> disarmed transition.
+        resetControlState();
+        return;
+    }
+    if (!wasArmed)
+    {
+        // Always begin a newly armed session without integrator or derivative
+        // history from a previous session.
+        resetControlState();
+    }
+
     const FlightControlMode nextMode = readModeSwitch();
     if (nextMode != _mode)
     {
@@ -602,21 +627,12 @@ void FlightControlRuntime::update(uint32_t nowUs)
         _mode = nextMode;
     }
 
-    const uint8_t armChannel = flightControlConfig.GetArmChannel();
-    const bool armActive = FlightControlRangeIsActive(
-        flightControlConfig.GetArmRange(), CRSF_to_US(ChannelData[armChannel]));
-    _armed = !flightControlConfig.GetArmMode() || armActive;
-    if (flightControlConfig.GetArmMode() && !armActive)
-    {
-        resetPidState();
-        return;
-    }
-
     float throttle;
     float rollAngleTarget;
     float pitchAngleTarget;
     float yawRateTarget;
     loadStickTargets(throttle, rollAngleTarget, pitchAngleTarget, yawRateTarget);
+
     _rollAngleTarget = rollAngleTarget;
     _pitchAngleTarget = pitchAngleTarget;
     _yawRateTarget = yawRateTarget;

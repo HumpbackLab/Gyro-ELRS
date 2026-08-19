@@ -91,6 +91,7 @@ private:
     void loadStickTargets(float &throttle, float &rollAngle, float &pitchAngle, float &yawRate);
     FlightControlMode readModeSwitch() const;
     void resetPidState();
+    void resetControlState();
     bool readTransformedImu(FlightControlImuSample &sample, float dt);
     void filterGyro(FlightControlImuSample &sample, float dt);
 
