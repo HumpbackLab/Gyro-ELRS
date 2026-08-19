@@ -262,6 +262,9 @@ void FlightControlRuntime::reset()
     _filteredGyroDps = {};
     _gyroFilterInitialized = false;
     _gyroFilterHz = 0;
+    _rollAngleTarget = _pitchAngleTarget = 0.0f;
+    _rollRateTarget = _pitchRateTarget = _yawRateTarget = 0.0f;
+    _armed = false;
 }
 
 void FlightControlRuntime::resetPidState()
@@ -453,6 +456,7 @@ void FlightControlRuntime::update(uint32_t nowUs)
     const uint8_t armChannel = flightControlConfig.GetArmChannel();
     const bool armActive = FlightControlRangeIsActive(
         flightControlConfig.GetArmRange(), CRSF_to_US(ChannelData[armChannel]));
+    _armed = !flightControlConfig.GetArmMode() || armActive;
     if (flightControlConfig.GetArmMode() && !armActive)
     {
         resetPidState();
@@ -464,6 +468,9 @@ void FlightControlRuntime::update(uint32_t nowUs)
     float pitchAngleTarget;
     float yawRateTarget;
     loadStickTargets(throttle, rollAngleTarget, pitchAngleTarget, yawRateTarget);
+    _rollAngleTarget = rollAngleTarget;
+    _pitchAngleTarget = pitchAngleTarget;
+    _yawRateTarget = yawRateTarget;
 
     if (_mode == FLIGHT_CONTROL_MODE_MANUAL)
     {
@@ -482,6 +489,8 @@ void FlightControlRuntime::update(uint32_t nowUs)
         rollRateTarget = _rollAnglePid.update(rollAngleTarget, _estimator.attitude().rollDeg, dt);
         pitchRateTarget = _pitchAnglePid.update(pitchAngleTarget, _estimator.attitude().pitchDeg, dt);
     }
+    _rollRateTarget = rollRateTarget;
+    _pitchRateTarget = pitchRateTarget;
 
     const float gyroRoll = sample.gyroValid ? sample.gyroDps.x : 0.0f;
     const float gyroPitch = sample.gyroValid ? sample.gyroDps.y : 0.0f;
@@ -509,6 +518,12 @@ bool FlightControlRuntime::getDebugSnapshot(FlightControlDebugSnapshot &snapshot
     snapshot.pidReady = _pidReady;
     snapshot.mode = _mode;
     snapshot.attitudeValid = _estimator.attitudeValid();
+    snapshot.rollAngleTarget = _rollAngleTarget;
+    snapshot.pitchAngleTarget = _pitchAngleTarget;
+    snapshot.rollRateTarget = _rollRateTarget;
+    snapshot.pitchRateTarget = _pitchRateTarget;
+    snapshot.yawRateTarget = _yawRateTarget;
+    snapshot.armed = _armed;
     return _lastDebugUpdateMs != 0;
 }
 

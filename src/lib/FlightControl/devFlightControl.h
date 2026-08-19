@@ -49,11 +49,18 @@ struct FlightControlDebugSnapshot {
     bool pidReady;
     FlightControlMode mode;
     bool attitudeValid;
+    float rollAngleTarget;
+    float pitchAngleTarget;
+    float rollRateTarget;
+    float pitchRateTarget;
+    float yawRateTarget;
+    bool armed;
 };
 
 const FlightControlAttitude &flightControlGetAttitude();
 const FlightControlMixerOutput &flightControlGetMixerOutput();
 bool flightControlGetDebugSnapshot(FlightControlDebugSnapshot &snapshot);
+bool flightControlWifiSwitchOnlyActive();
 
 #else
 #endif

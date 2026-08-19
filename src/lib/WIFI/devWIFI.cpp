@@ -18,6 +18,7 @@
 
 #if defined(PLATFORM_ESP32)
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #if defined(WIFI_ENABLE_MDNS)
 #include <ESPmDNS.h>
 #endif
@@ -85,6 +86,56 @@ static char station_password[65];
 static bool wifiStarted = false;
 static bool flightControlWifiCoexist = false;
 static bool flightControlWifiSwitchOnly = false;
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX) && defined(PLATFORM_ESP32)
+#include "devFlightControl.h"
+static WiFiUDP flightControlUdp;
+static uint32_t flightControlUdpSequence = 0;
+static uint32_t flightControlUdpLastMs = 0;
+static constexpr uint16_t FLIGHT_CONTROL_UDP_PORT = 14580;
+
+struct __attribute__((packed)) FlightControlUdpPacket {
+  char magic[4];
+  uint8_t version;
+  uint8_t mode;
+  uint8_t flags;
+  uint8_t reserved;
+  uint32_t sequence;
+  uint32_t timestampMs;
+  uint16_t loopTimeUs;
+  uint16_t checksum;
+  float values[10];
+};
+
+static uint16_t flightControlPacketChecksum(const uint8_t *data, size_t length)
+{
+  uint16_t crc = 0xFFFF;
+  while (length--) {
+    crc ^= (uint16_t)*data++ << 8;
+    for (uint8_t bit = 0; bit < 8; ++bit) crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : crc << 1;
+  }
+  return crc;
+}
+
+static void sendFlightControlUdp(uint32_t now)
+{
+  if (!flightControlWifiCoexist || !wifiStarted || (uint32_t)(now - flightControlUdpLastMs) < 20) return;
+  flightControlUdpLastMs = now;
+  FlightControlDebugSnapshot sample = {};
+  if (!flightControlGetDebugSnapshot(sample) || sample.mode == FLIGHT_CONTROL_MODE_MANUAL) return;
+  FlightControlUdpPacket packet = {{'G','L','R','S'}, 1, (uint8_t)sample.mode,
+    (uint8_t)((sample.armed ? 1 : 0) | (sample.attitudeValid ? 2 : 0)), 0,
+    flightControlUdpSequence++, sample.updateTimestampMs, sample.updateDtUs, 0,
+    {sample.rollAngleTarget, sample.pitchAngleTarget,
+     sample.attitude.rollDeg, sample.attitude.pitchDeg,
+     sample.rollRateTarget, sample.pitchRateTarget, sample.yawRateTarget,
+     sample.imu.gyroDps.x, sample.imu.gyroDps.y, sample.imu.gyroDps.z}};
+  packet.checksum = flightControlPacketChecksum((const uint8_t *)&packet, sizeof(packet));
+  if (flightControlUdp.beginPacket(IPAddress(255,255,255,255), FLIGHT_CONTROL_UDP_PORT)) {
+    flightControlUdp.write((const uint8_t *)&packet, sizeof(packet));
+    flightControlUdp.endPacket(); // best effort: failure drops this frame
+  }
+}
+#endif
 bool webserverPreventAutoStart = false;
 
 static wl_status_t laststatus = WL_IDLE_STATUS;
@@ -1663,6 +1714,9 @@ static int timeout()
   {
     HandleWebUpdate();
     HandleMSP2WIFI();
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX) && defined(PLATFORM_ESP32)
+    sendFlightControlUdp(millis());
+#endif
 #if defined(PLATFORM_ESP8266)
     // When in STA mode, a small delay reduces power use from 90mA to 30mA when idle
     // In AP mode, it doesn't seem to make a measurable difference, but does not hurt
@@ -1716,7 +1770,11 @@ static void setFlightControlWifiState(bool coexist, bool switchOnly)
   if (flightControlWifiCoexist == coexist && flightControlWifiSwitchOnly == switchOnly) return;
   flightControlWifiCoexist = coexist;
   flightControlWifiSwitchOnly = switchOnly;
-  if (!coexist) {
+  if (coexist) {
+    flightControlUdpSequence = 0;
+    flightControlUdpLastMs = 0;
+  } else {
+    flightControlUdp.stop();
     // Tear the coexistence interface down immediately. If CH7 selected pure
     // WiFi, the normal WiFi event will then restart it and stop the radio.
     if (wifiStarted) {
