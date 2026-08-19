@@ -117,6 +117,183 @@ static String target_found;
 static bool target_complete = false;
 static bool force_update = false;
 static uint32_t totalSize;
+static size_t uploadExpectedSize = 0;
+static bool uploadFinalChunkSeen = false;
+static bool uploadAwaitingForce = false;
+static String uploadRejectReason;
+static String uploadedProductName;
+static AsyncWebServerRequest *activeUploadRequest = nullptr;
+static std::set<AsyncWebServerRequest *> rejectedConcurrentUploads;
+static uint8_t uploadedImageHeader[24] = {};
+static size_t uploadedImageHeaderBytes = 0;
+
+// The historical name is retained intentionally. Both uppercase and lowercase
+// hexadecimal digits are accepted so existing upload clients remain compatible.
+static bool IsLowerHexDigest(const String &digest, size_t expectedLength)
+{
+  if (digest.length() != expectedLength)
+  {
+    return false;
+  }
+  for (size_t i = 0; i < digest.length(); ++i)
+  {
+    const char value = digest[i];
+    if (!((value >= '0' && value <= '9') || (value >= 'a' && value <= 'f') || (value >= 'A' && value <= 'F')))
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool ParseUploadSize(const String &value, size_t &parsed)
+{
+  if (value.length() == 0)
+  {
+    return false;
+  }
+  uint64_t result = 0;
+  for (size_t i = 0; i < value.length(); ++i)
+  {
+    if (value[i] < '0' || value[i] > '9')
+    {
+      return false;
+    }
+    result = result * 10U + (uint8_t)(value[i] - '0');
+    if (result > SIZE_MAX)
+    {
+      return false;
+    }
+  }
+  parsed = (size_t)result;
+  return parsed > 0;
+}
+
+static void SetUploadRejectReason(const String &reason)
+{
+  if (uploadRejectReason.length() == 0)
+  {
+    uploadRejectReason = reason;
+  }
+}
+
+static void SendUploadJson(AsyncWebServerRequest *request, const char *status, const String &message)
+{
+  JsonDocument doc;
+  doc["status"] = status;
+  doc["msg"] = message;
+  String body;
+  serializeJson(doc, body);
+  AsyncWebServerResponse *response = request->beginResponse(200, "application/json", body);
+  response->addHeader("Connection", "close");
+  response->addHeader("Cache-Control", "no-store");
+  request->send(response);
+}
+
+#if defined(PLATFORM_ESP32) && (defined(TARGET_UNIFIED_RX) || defined(TARGET_UNIFIED_TX))
+static bool ValidateUploadedUnifiedConfiguration(String &reason)
+{
+  if (uploadedImageHeaderBytes < sizeof(uploadedImageHeader) || uploadedImageHeader[0] != 0xE9)
+  {
+    reason = "Firmware image header is missing or invalid.";
+    return false;
+  }
+
+  const uint8_t segmentCount = uploadedImageHeader[1];
+  if (segmentCount == 0 || segmentCount > 16)
+  {
+    reason = "Firmware image has an invalid ESP segment count.";
+    return false;
+  }
+
+  const esp_partition_t *partition = esp_ota_get_next_update_partition(nullptr);
+  if (!partition)
+  {
+    reason = "No inactive OTA partition is available for validation.";
+    return false;
+  }
+
+  uint32_t position = sizeof(uploadedImageHeader);
+  for (uint8_t segment = 0; segment < segmentCount; ++segment)
+  {
+    uint8_t segmentHeader[8];
+    if ((uint64_t)position + sizeof(segmentHeader) > uploadExpectedSize ||
+        esp_partition_read(partition, position, segmentHeader, sizeof(segmentHeader)) != ESP_OK)
+    {
+      reason = "Firmware segment table is truncated or unreadable.";
+      return false;
+    }
+    const uint32_t segmentSize =
+      (uint32_t)segmentHeader[4] |
+      ((uint32_t)segmentHeader[5] << 8) |
+      ((uint32_t)segmentHeader[6] << 16) |
+      ((uint32_t)segmentHeader[7] << 24);
+    const uint64_t nextPosition = (uint64_t)position + sizeof(segmentHeader) + segmentSize;
+    if (nextPosition > uploadExpectedSize || nextPosition > UINT32_MAX)
+    {
+      reason = "Firmware segment data is truncated or has an invalid size.";
+      return false;
+    }
+    position = (uint32_t)nextPosition;
+  }
+
+  // Match python/UnifiedConfiguration.py: align past the checksum byte, then
+  // skip the 32-byte ESP image validation hash.
+  const uint32_t firmwareEnd = ((position + 16U) & ~15U) + 32U;
+  static constexpr size_t PRODUCT_SIZE = 128;
+  static constexpr size_t DEVICE_SIZE = 16;
+  static constexpr size_t OPTIONS_SIZE = 512;
+  static constexpr size_t HARDWARE_SIZE = 2048;
+  static constexpr size_t HARDWARE_OFFSET = PRODUCT_SIZE + DEVICE_SIZE + OPTIONS_SIZE;
+  static constexpr size_t UNIFIED_CONFIG_SIZE = HARDWARE_OFFSET + HARDWARE_SIZE;
+  if ((uint64_t)firmwareEnd + UNIFIED_CONFIG_SIZE > uploadExpectedSize)
+  {
+    reason = "Unified firmware hardware configuration is missing or truncated.";
+    return false;
+  }
+
+  char product[PRODUCT_SIZE + 1] = {};
+  if (esp_partition_read(partition, firmwareEnd, product, PRODUCT_SIZE) != ESP_OK)
+  {
+    reason = "Unable to read the uploaded firmware product name.";
+    return false;
+  }
+  product[PRODUCT_SIZE] = '\0';
+  uploadedProductName = product;
+  uploadedProductName.trim();
+  if (uploadedProductName.length() == 0)
+  {
+    reason = "Uploaded firmware product name is missing.";
+    return false;
+  }
+  // Bare Unified images are an established workflow: users may flash one and
+  // select the hardware target from the WebUI afterwards. Leave the product
+  // name available to the normal mismatch/force-confirmation path, but do not
+  // require a populated hardware JSON block here.
+  if (uploadedProductName == "Unified" || uploadedProductName == "Unified RX" ||
+      uploadedProductName == "Unified TX")
+  {
+    return true;
+  }
+
+  char hardware[HARDWARE_SIZE + 1];
+  if (esp_partition_read(partition, firmwareEnd + HARDWARE_OFFSET, hardware, HARDWARE_SIZE) != ESP_OK)
+  {
+    reason = "Unable to read the uploaded firmware hardware configuration.";
+    return false;
+  }
+  hardware[HARDWARE_SIZE] = '\0';
+  JsonDocument doc;
+  const DeserializationError error = deserializeJson(doc, hardware);
+  if (error || !doc.is<JsonObject>() || doc.as<JsonObject>().size() == 0)
+  {
+    reason = String("Uploaded hardware configuration is invalid: ") +
+      (error ? error.c_str() : "empty JSON object");
+    return false;
+  }
+  return true;
+}
+#endif
 
 void setWifiUpdateMode()
 {
@@ -207,7 +384,6 @@ static void WebUpdateHandleRoot(AsyncWebServerRequest *request)
   { // If captive portal redirect instead of displaying the page.
     return;
   }
-  force_update = request->hasArg("force");
 #if defined(EXTERNAL_CONFIGURATOR_ONLY)
   request->send(200, "text/plain", "Configure this device with Gyro ELRS Configurator at http://10.0.0.1");
 #else
@@ -1110,68 +1286,217 @@ static void corsPreflightResponse(AsyncWebServerRequest *request) {
   request->send(response);
 }
 
-static void WebUploadResponseHandler(AsyncWebServerRequest *request) {
-  if (target_seen || Update.hasError()) {
-    String msg;
-    if (!Update.hasError() && Update.end()) {
-      DBGLN("Update complete, rebooting");
-      msg = String("{\"status\": \"ok\", \"msg\": \"Update complete. ");
-      #if defined(TARGET_RX)
-        msg += "Please wait for the LED to resume blinking before disconnecting power.\"}";
-      #else
-        msg += "Please wait for a few seconds while the device reboots.\"}";
-      #endif
-      rebootTime = millis() + 200;
-    } else {
-      StreamString p = StreamString();
-      if (Update.hasError()) {
-        Update.printError(p);
-      } else {
-        p.println("Not enough data uploaded!");
-      }
-      p.trim();
-      DBGLN("Failed to upload firmware: %s", p.c_str());
-      msg = String("{\"status\": \"error\", \"msg\": \"") + p + "\"}";
-    }
-    AsyncWebServerResponse *response = request->beginResponse(200, "application/json", msg);
-    response->addHeader("Connection", "close");
-    request->send(response);
-    request->client()->close();
-  } else {
-    String message = String("{\"status\": \"mismatch\", \"msg\": \"<b>Current target:</b> ") + (const char *)&target_name[4] + ".<br>";
-    if (target_found.length() != 0) {
-      message += "<b>Uploaded image:</b> " + target_found + ".<br/>";
-    }
-    message += "<br/>It looks like you are flashing firmware with a different name to the current  firmware.  This sometimes happens because the hardware was flashed from the factory with an early version that has a different name. Or it may have even changed between major releases.";
-    message += "<br/><br/>Please double check you are uploading the correct target, then proceed with 'Flash Anyway'.\"}";
-    request->send(200, "application/json", message);
+// The ESP8266 Updater has no abort(): the update only becomes active once
+// Update.end() commits it, so dropping an in-progress upload is enough to
+// leave the current firmware untouched there.
+static void abortActiveUpdate()
+{
+#if defined(PLATFORM_ESP32)
+  if (Update.isRunning())
+  {
+    Update.abort();
   }
+#endif
+}
+
+static void WebUploadResponseHandler(AsyncWebServerRequest *request) {
+  if (rejectedConcurrentUploads.erase(request) != 0)
+  {
+    SendUploadJson(request, "error", "Upload is not allowed because another firmware upload is already in progress.");
+    return;
+  }
+  const bool forceConfirmation = request->url() == "/forceupdate";
+  if (!forceConfirmation && activeUploadRequest != request)
+  {
+    SendUploadJson(request, "error", "Upload is not allowed because the request did not contain a firmware file.");
+    return;
+  }
+  if (!forceConfirmation)
+  {
+    activeUploadRequest = nullptr;
+  }
+
+  if (uploadRejectReason.length() == 0 && (!uploadFinalChunkSeen || totalSize != uploadExpectedSize))
+  {
+    SetUploadRejectReason(String("Firmware upload is incomplete: received ") + totalSize +
+      " of " + uploadExpectedSize + " bytes.");
+  }
+
+  if (uploadRejectReason.length() == 0 && Update.hasError())
+  {
+    StreamString updateError;
+    Update.printError(updateError);
+    updateError.trim();
+    SetUploadRejectReason(String("Flash writer rejected the image: ") + updateError);
+  }
+
+#if defined(PLATFORM_ESP32) && (defined(TARGET_UNIFIED_RX) || defined(TARGET_UNIFIED_TX))
+  if (uploadRejectReason.length() == 0)
+  {
+    String validationError;
+    if (!ValidateUploadedUnifiedConfiguration(validationError))
+    {
+      SetUploadRejectReason(validationError);
+    }
+  }
+#endif
+
+  if (uploadRejectReason.length() != 0)
+  {
+    abortActiveUpdate();
+    uploadAwaitingForce = false;
+    DBGLN("Firmware upload rejected: %s", uploadRejectReason.c_str());
+    SendUploadJson(request, "error", uploadRejectReason);
+    return;
+  }
+
+  const bool productMismatch = uploadedProductName.length() != 0 &&
+    uploadedProductName != String(product_name);
+  if (!force_update && (!target_seen || productMismatch))
+  {
+    uploadAwaitingForce = true;
+    String message = String("Current target: ") + (const char *)&target_name[4] + ".";
+    if (target_found.length() != 0)
+    {
+      message += String(" Uploaded image target: ") + target_found + ".";
+    }
+    if (productMismatch)
+    {
+      message += String(" Current product: ") + product_name +
+        ". Uploaded product: " + uploadedProductName + ".";
+    }
+    message += " Verify that the firmware is for this exact board before choosing Flash Anyway.";
+    SendUploadJson(request, "mismatch", message);
+    return;
+  }
+
+  uploadAwaitingForce = false;
+  if (!Update.end())
+  {
+    StreamString updateError;
+    Update.printError(updateError);
+    updateError.trim();
+    const String reason = String("Final firmware verification failed: ") + updateError;
+    DBGLN("%s", reason.c_str());
+    SendUploadJson(request, "error", reason);
+    return;
+  }
+
+  DBGLN("Update complete, rebooting");
+  String message = "Update complete and verified. ";
+#if defined(TARGET_RX)
+  message += "Keep power connected and wait for the LED to resume blinking.";
+#else
+  message += "Keep power connected while the device reboots.";
+#endif
+  SendUploadJson(request, "ok", message);
+  // Allow the asynchronous HTTP response to leave the device before rebooting.
+  rebootTime = millis() + 1500;
 }
 
 static void WebUploadDataHandler(AsyncWebServerRequest *request, const String& filename, size_t index, uint8_t *data, size_t len, bool final) {
-  force_update = force_update || request->hasArg("force");
   if (index == 0) {
     #ifdef HAS_WIFI_JOYSTICK
       WifiJoystick::StopJoystickService();
     #endif
 
-    size_t filesize = request->header("X-FileSize").toInt();
-    DBGLN("Update: '%s' size %u", filename.c_str(), filesize);
+    if (activeUploadRequest && activeUploadRequest != request)
+    {
+      rejectedConcurrentUploads.insert(request);
+      request->onDisconnect([request]() {
+        rejectedConcurrentUploads.erase(request);
+      });
+      return;
+    }
+    activeUploadRequest = request;
+    request->onDisconnect([request]() {
+      if (activeUploadRequest == request)
+      {
+        activeUploadRequest = nullptr;
+        if (!uploadAwaitingForce && Update.isRunning() && totalSize < uploadExpectedSize)
+        {
+          abortActiveUpdate();
+          SetUploadRejectReason("Firmware upload connection was interrupted before completion.");
+        }
+      }
+    });
+
+    uploadRejectReason.clear();
+    uploadedProductName.clear();
+    uploadExpectedSize = 0;
+    uploadFinalChunkSeen = false;
+    uploadAwaitingForce = false;
+    uploadedImageHeaderBytes = 0;
+    memset(uploadedImageHeader, 0, sizeof(uploadedImageHeader));
+    target_seen = false;
+    target_found.clear();
+    target_complete = false;
+    target_pos = 0;
+    totalSize = 0;
+    force_update = request->hasArg("force");
+
+    abortActiveUpdate();
+
+    if (!request->hasHeader("X-FileSize") ||
+        !ParseUploadSize(request->header("X-FileSize"), uploadExpectedSize))
+    {
+      SetUploadRejectReason("Upload is not allowed because X-FileSize is missing or invalid.");
+      return;
+    }
+    if (request->hasHeader("X-File-MD5") &&
+        !IsLowerHexDigest(request->header("X-File-MD5"), 32))
+    {
+      SetUploadRejectReason("Upload is not allowed because X-File-MD5 is invalid.");
+      return;
+    }
+
+    DBGLN("Update: '%s' size %u", filename.c_str(), uploadExpectedSize);
     #if defined(PLATFORM_ESP8266)
     Update.runAsync(true);
     uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
     DBGLN("Free space = %u", maxSketchSpace);
     UNUSED(maxSketchSpace); // for warning
     #endif
-    if (!Update.begin(filesize, U_FLASH)) { // pass the size provided
-      Update.printError(LOGGING_UART);
+    if (!Update.begin(uploadExpectedSize, U_FLASH)) {
+      StreamString updateError;
+      Update.printError(updateError);
+      updateError.trim();
+      SetUploadRejectReason(String("Upload is not allowed: ") + updateError);
+      return;
     }
-    target_seen = false;
-    target_found.clear();
-    target_complete = false;
-    target_pos = 0;
-    totalSize = 0;
+    if (request->hasHeader("X-File-MD5"))
+    {
+      String expectedMd5 = request->header("X-File-MD5");
+      expectedMd5.toLowerCase();
+      if (!Update.setMD5(expectedMd5.c_str()))
+      {
+        SetUploadRejectReason("Upload is not allowed because the MD5 checksum could not be initialized.");
+        abortActiveUpdate();
+        return;
+      }
+    }
   }
+
+  if (uploadRejectReason.length() != 0)
+  {
+    return;
+  }
+
+  if ((uint64_t)index + len > uploadExpectedSize)
+  {
+    SetUploadRejectReason("Upload contains more data than declared by X-FileSize.");
+    abortActiveUpdate();
+    return;
+  }
+
+  if (uploadedImageHeaderBytes < sizeof(uploadedImageHeader) && index < sizeof(uploadedImageHeader))
+  {
+    const size_t copyOffset = index;
+    const size_t copyLength = min(len, sizeof(uploadedImageHeader) - copyOffset);
+    memcpy(uploadedImageHeader + copyOffset, data, copyLength);
+    uploadedImageHeaderBytes = max(uploadedImageHeaderBytes, copyOffset + copyLength);
+  }
+
   if (len) {
     DBGVLN("writing %d", len);
     if (Update.write(data, len) == len) {
@@ -1203,20 +1528,36 @@ static void WebUploadDataHandler(AsyncWebServerRequest *request, const String& f
       }
       totalSize += len;
     } else {
-      DBGLN("write failed to write %d", len);
+      StreamString updateError;
+      Update.printError(updateError);
+      updateError.trim();
+      SetUploadRejectReason(String("Flash write failed after ") + totalSize +
+        " bytes: " + updateError);
+      DBGLN("%s", uploadRejectReason.c_str());
     }
+  }
+  if (final)
+  {
+    uploadFinalChunkSeen = true;
   }
 }
 
 static void WebUploadForceUpdateHandler(AsyncWebServerRequest *request) {
-  target_seen = true;
   if (request->arg("action").equals("confirm")) {
+    if (!uploadAwaitingForce || !Update.isRunning())
+    {
+      SendUploadJson(request, "error", "There is no complete, structurally valid firmware upload waiting for confirmation.");
+      return;
+    }
+    force_update = true;
+    target_seen = true;
     WebUploadResponseHandler(request);
   } else {
     #if defined(PLATFORM_ESP32)
       Update.abort();
     #endif
-    request->send(200, "application/json", "{\"status\": \"ok\", \"msg\": \"Update cancelled\"}");
+    uploadAwaitingForce = false;
+    SendUploadJson(request, "ok", "Update cancelled; the current firmware was not replaced.");
   }
 }
 

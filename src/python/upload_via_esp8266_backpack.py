@@ -1,5 +1,15 @@
-import subprocess, os
+import hashlib
+import os
+import subprocess
 from elrs_helpers import ElrsUploadResult
+
+
+def file_md5(path: str) -> str:
+    digest = hashlib.md5()
+    with open(path, 'rb') as firmware:
+        for chunk in iter(lambda: firmware.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def process_http_result(output_json_file: str) -> int:
@@ -59,7 +69,6 @@ def do_upload(elrs_bin_target, pio_target, upload_addr, isstm, env):
 
     cmd = ["curl", "--max-time", "60",
            "--retry", "2", "--retry-delay", "1",
-           "--header", "X-FileSize: " + str(os.path.getsize(elrs_bin_target)),
            "-o", "%s" % (bin_upload_output)]
 
     uri = 'update'
@@ -74,11 +83,15 @@ def do_upload(elrs_bin_target, pio_target, upload_addr, isstm, env):
         cmd += ["-F", "flash_address=0x%X" % (app_start,)]
         cmd += ["-F", "type=tx"]
     if do_bin_upload:
+        cmd += ["--header", "X-FileSize: " + str(os.path.getsize(elrs_bin_target))]
+        cmd += ["--header", "X-File-MD5: " + file_md5(elrs_bin_target)]
         cmd += "-F", "data=@%s" % (elrs_bin_target),
 
     if bootloader_target is not None and isstm:
         cmd_bootloader = ["curl", "--max-time", "60",
             "--retry", "2", "--retry-delay", "1",
+            "--header", "X-FileSize: " + str(os.path.getsize(bootloader_target)),
+            "--header", "X-File-MD5: " + file_md5(bootloader_target),
             "-F", "data=@%s" % (bootloader_target,), "-F", "flash_address=0x0000"]
 
     upload_port = env.get('UPLOAD_PORT', None)
