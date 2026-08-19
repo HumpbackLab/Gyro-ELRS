@@ -71,6 +71,19 @@ Positive pitch rate: gyro.y becomes positive
 Positive yaw rate:   gyro.z becomes positive
 ```
 
+## Calibration Order
+
+The runtime IMU path is:
+
+```text
+raw sensor sample -> fc_orientation -> saved aircraft-frame bias/scale calibration -> gyro LPF -> estimator/PID
+```
+
+After `fc_orientation`, gyro calibration applies `tf - gyro_bias` and
+accelerometer calibration applies `(tf - accel_bias) * accel_scale`.
+`/status.json` reports both raw sensor values (for orientation setup) and
+uncalibrated `tf-*` aircraft-frame values (for IMU calibration).
+
 ## `fc_orientation` Goal
 
 `fc_orientation` is a row-major 3x3 matrix. It should rotate the raw IMU sensor frame into the internal frame above.
@@ -157,6 +170,18 @@ Roll 正角速度： gyro.x 变为正
 Pitch 正角速度：gyro.y 变为正
 Yaw 正角速度：  gyro.z 变为正
 ```
+
+## 校准顺序
+
+运行时 IMU 数据流为：
+
+```text
+传感器原始采样 -> fc_orientation -> 已保存的机体系零偏/比例校准 -> 陀螺仪低通 -> 姿态估计/PID
+```
+
+`fc_orientation` 之后，陀螺仪校准使用 `tf - gyro_bias`，加速度计校准使用
+`(tf - accel_bias) * accel_scale`。`/status.json` 同时提供用于安装方向设置的原始传感器数据，
+以及用于 IMU 校准的未校准 `tf-*` 机体系数据。
 
 ## `fc_orientation` 的目标
 

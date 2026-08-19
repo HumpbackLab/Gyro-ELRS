@@ -22,6 +22,10 @@ private:
     FlightControlAttitude _attitude = {};
     FlightControlAttitude _accelAttitude = {};
     bool _attitudeValid = false;
+    float _quatW = 1.0f;
+    float _quatX = 0.0f;
+    float _quatY = 0.0f;
+    float _quatZ = 0.0f;
 };
 
 class FlightControlPid {
@@ -87,6 +91,7 @@ private:
     void loadStickTargets(float &throttle, float &rollAngle, float &pitchAngle, float &yawRate);
     FlightControlMode readModeSwitch() const;
     void resetPidState();
+    bool readTransformedImu(FlightControlImuSample &sample, float dt);
     void filterGyro(FlightControlImuSample &sample, float dt);
 
     FlightControlSensorBackend _sensors;

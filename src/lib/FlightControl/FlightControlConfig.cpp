@@ -7,6 +7,7 @@
 #if defined(PLATFORM_ESP32)
 #include <SPIFFS.h>
 #endif
+#include <math.h>
 #include <string.h>
 
 static constexpr char FC_CONFIG_FILE[] = "/fc.json";
@@ -203,9 +204,19 @@ void FlightControlConfig::Load()
         }
     }
     JsonArray gyroBias = doc["gyro_bias"].as<JsonArray>();
-    for (uint8_t axis = 0; axis < min(gyroBias.size(), (size_t)FC_IMU_AXIS_COUNT); ++axis) m_gyroBias[axis] = gyroBias[axis].as<float>();
+    if (gyroBias.size() >= FC_IMU_AXIS_COUNT)
+    {
+        float values[FC_IMU_AXIS_COUNT];
+        for (uint8_t axis = 0; axis < FC_IMU_AXIS_COUNT; ++axis) values[axis] = gyroBias[axis].as<float>();
+        SetGyroBias(values, FC_IMU_AXIS_COUNT);
+    }
     JsonArray accelBias = doc["accel_bias"].as<JsonArray>();
-    for (uint8_t axis = 0; axis < min(accelBias.size(), (size_t)FC_IMU_AXIS_COUNT); ++axis) m_accelBias[axis] = accelBias[axis].as<float>();
+    if (accelBias.size() >= FC_IMU_AXIS_COUNT)
+    {
+        float values[FC_IMU_AXIS_COUNT];
+        for (uint8_t axis = 0; axis < FC_IMU_AXIS_COUNT; ++axis) values[axis] = accelBias[axis].as<float>();
+        SetAccelBias(values, FC_IMU_AXIS_COUNT);
+    }
     JsonArray accelScale = doc["accel_scale"].as<JsonArray>();
     for (uint8_t axis = 0; axis < min(accelScale.size(), (size_t)FC_IMU_AXIS_COUNT); ++axis)
     {
@@ -512,11 +523,21 @@ static bool setImuVector(float *target, const float *values, uint8_t count, bool
 
 void FlightControlConfig::SetGyroBias(const float *values, uint8_t count)
 {
+    if (!values || count < FC_IMU_AXIS_COUNT) return;
+    for (uint8_t axis = 0; axis < FC_IMU_AXIS_COUNT; ++axis)
+    {
+        if (!isfinite(values[axis]) || fabsf(values[axis]) > 100.0f) return;
+    }
     if (setImuVector(m_gyroBias, values, count, false)) m_modified = true;
 }
 
 void FlightControlConfig::SetAccelBias(const float *values, uint8_t count)
 {
+    if (!values || count < FC_IMU_AXIS_COUNT) return;
+    for (uint8_t axis = 0; axis < FC_IMU_AXIS_COUNT; ++axis)
+    {
+        if (!isfinite(values[axis]) || fabsf(values[axis]) > 20.0f) return;
+    }
     if (setImuVector(m_accelBias, values, count, false)) m_modified = true;
 }
 

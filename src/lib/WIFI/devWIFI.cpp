@@ -487,6 +487,17 @@ static void JsonFlightControlOrientationToConfig(JsonVariant &json)
   }
   flightControlConfig.SetOrientation(orientation, FC_ORIENTATION_VALUE_COUNT);
 }
+
+static void JsonFlightControlImuVectorToConfig(JsonVariant &json, const char *key,
+  void (FlightControlConfig::*setter)(const float *, uint8_t))
+{
+  if (!json.containsKey(key)) return;
+  JsonArray array = json[key].as<JsonArray>();
+  if (array.size() < FC_IMU_AXIS_COUNT) return;
+  float values[FC_IMU_AXIS_COUNT];
+  for (uint8_t axis = 0; axis < FC_IMU_AXIS_COUNT; ++axis) values[axis] = array[axis].as<float>();
+  (flightControlConfig.*setter)(values, FC_IMU_AXIS_COUNT);
+}
 #endif
 
 static void GetConfiguration(AsyncWebServerRequest *request)
@@ -669,6 +680,8 @@ static void GetRuntimeStatus(AsyncWebServerRequest *request)
 #if defined(HAS_GYRO)
   JsonObject imu = json["imu"].to<JsonObject>();
   imu["gyro-ready"] = GyroIsInitialized();
+  imu["frame"] = "sensor-raw";
+  imu["calibrated"] = false;
   GyroSample gyroSample;
   if (GyroGetSample(gyroSample))
   {
@@ -684,6 +697,35 @@ static void GetRuntimeStatus(AsyncWebServerRequest *request)
     gyro["x"] = gyroSample.gyroDps.x;
     gyro["y"] = gyroSample.gyroDps.y;
     gyro["z"] = gyroSample.gyroDps.z;
+
+    #if defined(HAS_BASIC_FLIGHT_CONTROL)
+    const float rawAccel[FC_IMU_AXIS_COUNT] = {
+      gyroSample.accelMps2.x, gyroSample.accelMps2.y, gyroSample.accelMps2.z};
+    const float rawGyro[FC_IMU_AXIS_COUNT] = {
+      gyroSample.gyroDps.x, gyroSample.gyroDps.y, gyroSample.gyroDps.z};
+    float transformedAccel[FC_IMU_AXIS_COUNT] = {};
+    float transformedGyro[FC_IMU_AXIS_COUNT] = {};
+    const float *orientation = flightControlConfig.GetOrientation();
+    for (uint8_t row = 0; row < FC_IMU_AXIS_COUNT; ++row)
+    {
+      for (uint8_t column = 0; column < FC_IMU_AXIS_COUNT; ++column)
+      {
+        const float coefficient = orientation[row * FC_IMU_AXIS_COUNT + column];
+        transformedAccel[row] += coefficient * rawAccel[column];
+        transformedGyro[row] += coefficient * rawGyro[column];
+      }
+    }
+    JsonObject tfAccel = imu["tf-accel-mps2"].to<JsonObject>();
+    tfAccel["x"] = transformedAccel[0];
+    tfAccel["y"] = transformedAccel[1];
+    tfAccel["z"] = transformedAccel[2];
+    JsonObject tfGyro = imu["tf-gyro-dps"].to<JsonObject>();
+    tfGyro["x"] = transformedGyro[0];
+    tfGyro["y"] = transformedGyro[1];
+    tfGyro["z"] = transformedGyro[2];
+    imu["tf-frame"] = "aircraft";
+    imu["tf-calibrated"] = false;
+    #endif
   }
   else
   {
@@ -905,24 +947,9 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
   JsonFlightControlMixerToConfig(json);
   JsonFlightControlMixerServosToConfig(json);
   JsonFlightControlOrientationToConfig(json);
-  if (json.containsKey("fc_gyro_bias"))
-  {
-    float values[FC_IMU_AXIS_COUNT];
-    JsonArray array = json["fc_gyro_bias"].as<JsonArray>();
-    if (array.size() >= FC_IMU_AXIS_COUNT) { for (uint8_t i=0; i<FC_IMU_AXIS_COUNT; ++i) values[i]=array[i].as<float>(); flightControlConfig.SetGyroBias(values, FC_IMU_AXIS_COUNT); }
-  }
-  if (json.containsKey("fc_accel_bias"))
-  {
-    float values[FC_IMU_AXIS_COUNT];
-    JsonArray array = json["fc_accel_bias"].as<JsonArray>();
-    if (array.size() >= FC_IMU_AXIS_COUNT) { for (uint8_t i=0; i<FC_IMU_AXIS_COUNT; ++i) values[i]=array[i].as<float>(); flightControlConfig.SetAccelBias(values, FC_IMU_AXIS_COUNT); }
-  }
-  if (json.containsKey("fc_accel_scale"))
-  {
-    float values[FC_IMU_AXIS_COUNT];
-    JsonArray array = json["fc_accel_scale"].as<JsonArray>();
-    if (array.size() >= FC_IMU_AXIS_COUNT) { for (uint8_t i=0; i<FC_IMU_AXIS_COUNT; ++i) values[i]=array[i].as<float>(); flightControlConfig.SetAccelScale(values, FC_IMU_AXIS_COUNT); }
-  }
+  JsonFlightControlImuVectorToConfig(json, "fc_gyro_bias", &FlightControlConfig::SetGyroBias);
+  JsonFlightControlImuVectorToConfig(json, "fc_accel_bias", &FlightControlConfig::SetAccelBias);
+  JsonFlightControlImuVectorToConfig(json, "fc_accel_scale", &FlightControlConfig::SetAccelScale);
   if (json.containsKey("fc_pwm_output_wifi_enabled"))
   {
     flightControlConfig.SetPwmOutputWifiEnabled(json["fc_pwm_output_wifi_enabled"] | false);
