@@ -635,8 +635,14 @@ void FlightControlRuntime::update(uint32_t nowUs)
 
     if (_mode == FLIGHT_CONTROL_MODE_ANGLE)
     {
-        rollRateTarget = _rollAnglePid.update(rollAngleTarget, _estimator.attitude().rollDeg, dt);
-        pitchRateTarget = _pitchAnglePid.update(pitchAngleTarget, _estimator.attitude().pitchDeg, dt);
+        rollRateTarget = constrain(
+            _rollAnglePid.update(rollAngleTarget, _estimator.attitude().rollDeg, dt),
+            -(float)flightControlConfig.GetAngleRateLimitDps(0),
+            (float)flightControlConfig.GetAngleRateLimitDps(0));
+        pitchRateTarget = constrain(
+            _pitchAnglePid.update(pitchAngleTarget, _estimator.attitude().pitchDeg, dt),
+            -(float)flightControlConfig.GetAngleRateLimitDps(1),
+            (float)flightControlConfig.GetAngleRateLimitDps(1));
     }
     _rollRateTarget = rollRateTarget;
     _pitchRateTarget = pitchRateTarget;

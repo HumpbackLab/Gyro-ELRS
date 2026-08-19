@@ -7,6 +7,10 @@
 #include <stdint.h>
 
 constexpr uint8_t FC_PID_TERM_COUNT = 12;
+constexpr uint8_t FC_ANGLE_RATE_LIMIT_AXIS_COUNT = 2;
+constexpr uint16_t FC_ANGLE_RATE_LIMIT_MIN_DPS = 1;
+constexpr uint16_t FC_ANGLE_RATE_LIMIT_MAX_DPS = 1000;
+constexpr uint16_t FC_ANGLE_RATE_LIMIT_DEFAULT_DPS = 100;
 constexpr uint8_t FC_MIXER_COLUMNS = 4;
 constexpr uint8_t FC_MIXER_MAX_MOTORS = 8;
 constexpr uint8_t FC_MIXER_VALUE_COUNT = FC_MIXER_COLUMNS * FC_MIXER_MAX_MOTORS;
@@ -67,6 +71,12 @@ public:
 
     const int16_t *GetRatePid() const { return m_ratePid; }
     const int16_t *GetAnglePid() const { return m_anglePid; }
+    uint16_t GetAngleRateLimitDps(uint8_t axis) const
+    {
+        return axis < FC_ANGLE_RATE_LIMIT_AXIS_COUNT
+            ? m_angleRateLimitDps[axis]
+            : FC_ANGLE_RATE_LIMIT_DEFAULT_DPS;
+    }
     uint8_t GetDtermLpfHz() const { return m_dtermLpfHz; }
     uint8_t GetGyroLpfHz() const { return m_gyroLpfHz; }
     bool GetModeEnabled(FlightControlMode mode) const { return mode != FLIGHT_CONTROL_MODE_MANUAL && m_modeEnabled[mode]; }
@@ -95,6 +105,7 @@ public:
 
     void SetRatePid(uint8_t index, int16_t value);
     void SetAnglePid(uint8_t index, int16_t value);
+    void SetAngleRateLimitDps(uint8_t axis, int valueDps);
     void SetDtermLpfHz(int frequencyHz);
     void SetGyroLpfHz(int frequencyHz);
     void SetModeEnabled(FlightControlMode mode, bool enabled);
@@ -119,6 +130,10 @@ public:
 private:
     int16_t m_ratePid[FC_PID_TERM_COUNT] = {};
     int16_t m_anglePid[FC_PID_TERM_COUNT] = {};
+    uint16_t m_angleRateLimitDps[FC_ANGLE_RATE_LIMIT_AXIS_COUNT] = {
+        FC_ANGLE_RATE_LIMIT_DEFAULT_DPS,
+        FC_ANGLE_RATE_LIMIT_DEFAULT_DPS,
+    };
     uint8_t m_dtermLpfHz = FC_DTERM_LPF_DEFAULT_HZ;
     uint8_t m_gyroLpfHz = FC_GYRO_LPF_DEFAULT_HZ;
     float m_mixer[FC_MIXER_VALUE_COUNT] = {};

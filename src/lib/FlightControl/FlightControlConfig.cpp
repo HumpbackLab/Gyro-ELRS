@@ -19,6 +19,10 @@ void FlightControlConfig::SetDefaults()
 {
     memset(m_ratePid, 0, sizeof(m_ratePid));
     memset(m_anglePid, 0, sizeof(m_anglePid));
+    for (uint8_t axis = 0; axis < FC_ANGLE_RATE_LIMIT_AXIS_COUNT; ++axis)
+    {
+        m_angleRateLimitDps[axis] = FC_ANGLE_RATE_LIMIT_DEFAULT_DPS;
+    }
     m_dtermLpfHz = FC_DTERM_LPF_DEFAULT_HZ;
     m_gyroLpfHz = FC_GYRO_LPF_DEFAULT_HZ;
     memset(m_mixer, 0, sizeof(m_mixer));
@@ -88,6 +92,11 @@ void FlightControlConfig::Load()
     for (uint8_t i = 0; i < min(anglePid.size(), (size_t)FC_PID_TERM_COUNT); ++i)
     {
         m_anglePid[i] = anglePid[i].as<int16_t>();
+    }
+    JsonArray angleRateLimits = doc["angle_rate_limits_dps"].as<JsonArray>();
+    for (uint8_t axis = 0; axis < min(angleRateLimits.size(), (size_t)FC_ANGLE_RATE_LIMIT_AXIS_COUNT); ++axis)
+    {
+        SetAngleRateLimitDps(axis, angleRateLimits[axis].as<int>());
     }
     SetDtermLpfHz(doc["dterm_lpf_hz"] | FC_DTERM_LPF_DEFAULT_HZ);
     SetGyroLpfHz(doc["gyro_lpf_hz"] | FC_GYRO_LPF_DEFAULT_HZ);
@@ -244,6 +253,7 @@ bool FlightControlConfig::Commit()
     JsonDocument doc;
     copyArray(m_ratePid, doc["rate_pid"].to<JsonArray>());
     copyArray(m_anglePid, doc["angle_pid"].to<JsonArray>());
+    copyArray(m_angleRateLimitDps, doc["angle_rate_limits_dps"].to<JsonArray>());
     doc["dterm_lpf_hz"] = m_dtermLpfHz;
     doc["gyro_lpf_hz"] = m_gyroLpfHz;
     JsonObject modeConditions = doc["mode_conditions"].to<JsonObject>();
@@ -412,6 +422,23 @@ void FlightControlConfig::SetWifiCoexistEnabled(bool enabled)
     if (m_wifiCoexistEnabled != enabled)
     {
         m_wifiCoexistEnabled = enabled;
+        m_modified = true;
+    }
+}
+
+void FlightControlConfig::SetAngleRateLimitDps(uint8_t axis, int valueDps)
+{
+    if (axis >= FC_ANGLE_RATE_LIMIT_AXIS_COUNT)
+    {
+        return;
+    }
+    const uint16_t clippedValue = (uint16_t)constrain(
+        valueDps,
+        (int)FC_ANGLE_RATE_LIMIT_MIN_DPS,
+        (int)FC_ANGLE_RATE_LIMIT_MAX_DPS);
+    if (m_angleRateLimitDps[axis] != clippedValue)
+    {
+        m_angleRateLimitDps[axis] = clippedValue;
         m_modified = true;
     }
 }

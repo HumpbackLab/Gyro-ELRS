@@ -568,6 +568,11 @@ static void GetConfiguration(AsyncWebServerRequest *request)
     FlightControlRangeToJson(configJson["fc_arm_range"].to<JsonArray>(), flightControlConfig.GetArmRange());
     FlightControlPidToJson(configJson, "fc_rate_pid", flightControlConfig.GetRatePid());
     FlightControlPidToJson(configJson, "fc_angle_pid", flightControlConfig.GetAnglePid());
+    JsonArray angleRateLimits = configJson["fc_angle_rate_limits_dps"].to<JsonArray>();
+    for (uint8_t axis = 0; axis < FC_ANGLE_RATE_LIMIT_AXIS_COUNT; ++axis)
+    {
+      angleRateLimits.add(flightControlConfig.GetAngleRateLimitDps(axis));
+    }
     configJson["fc_dterm_lpf_hz"] = flightControlConfig.GetDtermLpfHz();
     configJson["fc_gyro_lpf_hz"] = flightControlConfig.GetGyroLpfHz();
     FlightControlFloatArrayToJson(configJson, "fc_mixer", flightControlConfig.GetMixer(), flightControlConfig.GetMixerCount());
@@ -836,6 +841,14 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
   JsonPidToConfig(json, "fc_angle_pid", [](uint8_t index, int16_t value) {
     flightControlConfig.SetAnglePid(index, value);
   });
+  if (json.containsKey("fc_angle_rate_limits_dps"))
+  {
+    JsonArray limits = json["fc_angle_rate_limits_dps"].as<JsonArray>();
+    for (uint8_t axis = 0; axis < min(limits.size(), (size_t)FC_ANGLE_RATE_LIMIT_AXIS_COUNT); ++axis)
+    {
+      flightControlConfig.SetAngleRateLimitDps(axis, limits[axis].as<int>());
+    }
+  }
   if (json.containsKey("fc_dterm_lpf_hz"))
   {
     flightControlConfig.SetDtermLpfHz(json["fc_dterm_lpf_hz"].as<int>());
