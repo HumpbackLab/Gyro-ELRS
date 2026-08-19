@@ -511,11 +511,10 @@ void FlightControlRuntime::updateAttitudeOnly(uint32_t nowUs)
         return;
     }
 
-    if (_lastUpdateUs != 0 && (uint32_t)(nowUs - _lastUpdateUs) < FC_UPDATE_INTERVAL_US)
-    {
-        return;
-    }
-
+    // FlightControl_device already schedules this function every 4 ms. Do not
+    // apply a second strict microsecond gate here: millisecond scheduler jitter
+    // can invoke us a few microseconds early, and rejecting that invocation
+    // turns an otherwise valid 4 ms update into an 8 ms gap.
     const uint32_t dtUs = _lastUpdateUs == 0 ? FC_UPDATE_INTERVAL_US : (uint32_t)(nowUs - _lastUpdateUs);
     const float dt = dtUs * 1e-6f;
     _lastUpdateUs = nowUs;
@@ -575,11 +574,9 @@ void FlightControlRuntime::update(uint32_t nowUs)
         return;
     }
 
-    if (_lastUpdateUs != 0 && (uint32_t)(nowUs - _lastUpdateUs) < FC_UPDATE_INTERVAL_US)
-    {
-        return;
-    }
-
+    // Timing is owned by FlightControl_device. A duplicate gate here caused
+    // alternating 4/8 ms control updates when the device scheduler was only a
+    // few microseconds early.
     const uint32_t dtUs = _lastUpdateUs == 0 ? FC_UPDATE_INTERVAL_US : (uint32_t)(nowUs - _lastUpdateUs);
     const float dt = dtUs * 1e-6f;
     _lastUpdateUs = nowUs;

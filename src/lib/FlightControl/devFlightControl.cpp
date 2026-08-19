@@ -192,7 +192,10 @@ static void initialize()
 static int event()
 {
     runtime.refreshReadyState();
-    return DURATION_IMMEDIATELY;
+    // Start or resume on the same 4 ms cadence used by timeout(). An immediate
+    // update here would create a short-dt outlier whenever connection state or
+    // model-match events fire.
+    return 4;
 }
 
 static bool rcInputReady()
