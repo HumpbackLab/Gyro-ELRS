@@ -12,7 +12,7 @@
 
 static constexpr uint32_t FC_UPDATE_INTERVAL_US = 4000;
 static constexpr float FC_MAX_ROLL_PITCH_DEG = 35.0f;
-static constexpr float FC_MAX_YAW_RATE_DPS = 180.0f;
+static constexpr float FC_MAX_RATE_DPS = 180.0f;
 static constexpr float FC_COMPLEMENTARY_ALPHA = 0.98f;
 static constexpr uint16_t FC_COMPLEMENTARY_ALPHA_PERMILLE = (uint16_t)(FC_COMPLEMENTARY_ALPHA * 1000.0f);
 // Convert the legacy per-update alpha at 250 Hz to a correction rate. This
@@ -544,7 +544,7 @@ void FlightControlRuntime::loadStickTargets(float &throttle, float &roll, float 
     throttle = constrain((throttleUs - 988.0f) / (2012.0f - 988.0f), 0.0f, 1.0f) * 1000;
     roll = constrain((rollUs - 1500.0f) / 500.0f, -1.0f, 1.0f) * FC_MAX_ROLL_PITCH_DEG;
     pitch = constrain((pitchUs - 1500.0f) / 500.0f, -1.0f, 1.0f) * FC_MAX_ROLL_PITCH_DEG;
-    yaw = -constrain((yawUs - 1500.0f) / 500.0f, -1.0f, 1.0f) * FC_MAX_YAW_RATE_DPS;
+    yaw = -constrain((yawUs - 1500.0f) / 500.0f, -1.0f, 1.0f) * FC_MAX_RATE_DPS;
 }
 
 FlightControlMode FlightControlRuntime::readModeSwitch() const
@@ -626,13 +626,13 @@ void FlightControlRuntime::update(uint32_t nowUs)
     {
         const float roll = rollAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MANUAL_CONTROL_RANGE;
         const float pitch = pitchAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MANUAL_CONTROL_RANGE;
-        const float yaw = yawRateTarget / FC_MAX_YAW_RATE_DPS * FC_MANUAL_CONTROL_RANGE;
+        const float yaw = yawRateTarget / FC_MAX_RATE_DPS * FC_MANUAL_CONTROL_RANGE;
         _mixerOutput = _mixer.mix(throttle, roll, pitch, yaw);
         return;
     }
 
-    float rollRateTarget = rollAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MAX_YAW_RATE_DPS;
-    float pitchRateTarget = pitchAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MAX_YAW_RATE_DPS;
+    float rollRateTarget = rollAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MAX_RATE_DPS;
+    float pitchRateTarget = pitchAngleTarget / FC_MAX_ROLL_PITCH_DEG * FC_MAX_RATE_DPS;
 
     if (_mode == FLIGHT_CONTROL_MODE_ANGLE)
     {
