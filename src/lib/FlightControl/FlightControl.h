@@ -77,7 +77,7 @@ public:
     void reset();
     bool refreshReadyState();
     void update(uint32_t nowUs);
-    void updateAttitudeOnly(uint32_t nowUs);
+    void updateAttitudeOnly(uint32_t nowUs, bool rcInputAvailable);
     bool sensorsReady() const { return _sensorsReady; }
     bool ready() const { return _sensorsReady && _mixerReady && _pidReady; }
     const FlightControlAttitude &attitude() const { return _estimator.attitude(); }
@@ -91,7 +91,12 @@ private:
     void loadStickTargets(float &throttle, float &rollAngle, float &pitchAngle, float &yawRate);
     FlightControlMode readModeSwitch() const;
     void resetPidState();
+    void setSafeControlOutput();
     void resetControlState();
+    void resetAttitudeState();
+    void updateArmState(bool rcInputAvailable);
+    void beginArmGyroBiasSampling();
+    void completeArmGyroBiasSampling();
     bool readTransformedImu(FlightControlImuSample &sample, float dt);
     void filterGyro(FlightControlImuSample &sample, float dt);
 
@@ -109,6 +114,8 @@ private:
     FlightControlImuSample _lastImuSample = {};
     FlightControlVector3 _lastFilteredGyroDps = {};
     FlightControlVector3 _filteredGyroDps = {};
+    FlightControlVector3 _armGyroBiasDps = {};
+    FlightControlVector3 _armGyroBiasSumDps = {};
     uint32_t _lastDebugUpdateMs = 0;
     uint16_t _lastUpdateDtUs = 0;
     uint16_t _lastSampleAgeMs = 0;
@@ -117,6 +124,8 @@ private:
     bool _mixerReady = false;
     bool _pidReady = false;
     bool _gyroFilterInitialized = false;
+    bool _armGyroBiasSampling = false;
+    uint8_t _armGyroBiasSampleCount = 0;
     uint8_t _gyroFilterHz = 0;
     FlightControlMode _mode = FLIGHT_CONTROL_MODE_MANUAL;
     float _rollAngleTarget = 0.0f;

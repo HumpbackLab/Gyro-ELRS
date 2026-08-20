@@ -256,7 +256,7 @@ static int timeout()
     {
         if (connectionState == wifiUpdate)
         {
-            runtime.updateAttitudeOnly(micros());
+            runtime.updateAttitudeOnly(micros(), false);
             return 4;
         }
         runtime.reset();
@@ -272,7 +272,7 @@ static int timeout()
     {
         // Attitude estimation only needs the IMU. Keep it running even when
         // PID or mixer configuration is incomplete.
-        runtime.updateAttitudeOnly(nowUs);
+        runtime.updateAttitudeOnly(nowUs, true);
     }
 
     reportAttitude(millis());

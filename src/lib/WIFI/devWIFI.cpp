@@ -751,6 +751,7 @@ static void GetConfiguration(AsyncWebServerRequest *request)
     }
     configJson["fc_dterm_lpf_hz"] = flightControlConfig.GetDtermLpfHz();
     configJson["fc_gyro_lpf_hz"] = flightControlConfig.GetGyroLpfHz();
+    configJson["fc_gyro_bias_mode"] = flightControlConfig.GetGyroBiasMode();
     FlightControlFloatArrayToJson(configJson, "fc_mixer", flightControlConfig.GetMixer(), flightControlConfig.GetMixerCount());
     configJson["fc_mixer_count"] = flightControlConfig.GetMixerCount();
     JsonArray mixerServos = configJson["fc_mixer_servos"].to<JsonArray>();
@@ -1032,6 +1033,10 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
   if (json.containsKey("fc_gyro_lpf_hz"))
   {
     flightControlConfig.SetGyroLpfHz(json["fc_gyro_lpf_hz"].as<int>());
+  }
+  if (json.containsKey("fc_gyro_bias_mode"))
+  {
+    flightControlConfig.SetGyroBiasMode((FlightControlGyroBiasMode)json["fc_gyro_bias_mode"].as<int>());
   }
   if (json.containsKey("fc_mode_conditions"))
   {
