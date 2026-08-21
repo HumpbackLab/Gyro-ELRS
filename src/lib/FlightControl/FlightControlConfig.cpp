@@ -25,6 +25,7 @@ void FlightControlConfig::SetDefaults()
     }
     m_dtermLpfHz = FC_DTERM_LPF_DEFAULT_HZ;
     m_gyroLpfHz = FC_GYRO_LPF_DEFAULT_HZ;
+    m_gyroBiasMode = FLIGHT_CONTROL_GYRO_BIAS_CONFIGURED;
     memset(m_mixer, 0, sizeof(m_mixer));
     memset(m_mixerOutputServo, 0, sizeof(m_mixerOutputServo));
     memset(m_orientation, 0, sizeof(m_orientation));
@@ -100,6 +101,7 @@ void FlightControlConfig::Load()
     }
     SetDtermLpfHz(doc["dterm_lpf_hz"] | FC_DTERM_LPF_DEFAULT_HZ);
     SetGyroLpfHz(doc["gyro_lpf_hz"] | FC_GYRO_LPF_DEFAULT_HZ);
+    SetGyroBiasMode((FlightControlGyroBiasMode)(doc["gyro_bias_mode"] | FLIGHT_CONTROL_GYRO_BIAS_CONFIGURED));
 
     JsonVariant modeConditionsValue = doc["mode_conditions"];
     if (modeConditionsValue.is<JsonObject>())
@@ -256,6 +258,7 @@ bool FlightControlConfig::Commit()
     copyArray(m_angleRateLimitDps, doc["angle_rate_limits_dps"].to<JsonArray>());
     doc["dterm_lpf_hz"] = m_dtermLpfHz;
     doc["gyro_lpf_hz"] = m_gyroLpfHz;
+    doc["gyro_bias_mode"] = m_gyroBiasMode;
     JsonObject modeConditions = doc["mode_conditions"].to<JsonObject>();
     const char *keys[] = {nullptr, "rate", "angle"};
     for (uint8_t mode = FLIGHT_CONTROL_MODE_RATE; mode < FLIGHT_CONTROL_MODE_COUNT; ++mode)
@@ -413,6 +416,19 @@ void FlightControlConfig::SetArmMode(bool enabled)
     if (m_armMode != enabled)
     {
         m_armMode = enabled;
+        m_modified = true;
+    }
+}
+
+void FlightControlConfig::SetGyroBiasMode(FlightControlGyroBiasMode mode)
+{
+    if (mode >= FLIGHT_CONTROL_GYRO_BIAS_MODE_COUNT)
+    {
+        mode = FLIGHT_CONTROL_GYRO_BIAS_CONFIGURED;
+    }
+    if (m_gyroBiasMode != mode)
+    {
+        m_gyroBiasMode = mode;
         m_modified = true;
     }
 }

@@ -76,11 +76,14 @@ Positive yaw rate:   gyro.z becomes positive
 The runtime IMU path is:
 
 ```text
-raw sensor sample -> fc_orientation -> saved aircraft-frame bias/scale calibration -> gyro LPF -> estimator/PID
+raw sensor sample -> fc_orientation -> selected aircraft-frame bias/scale calibration -> gyro LPF -> estimator/PID
 ```
 
-After `fc_orientation`, gyro calibration applies `tf - gyro_bias` and
-accelerometer calibration applies `(tf - accel_bias) * accel_scale`.
+After `fc_orientation`, gyro calibration applies either the saved `gyro_bias`
+or the runtime bias sampled before arming, according to `gyro_bias_mode`.
+Arm-time samples update runtime control state only and are not written to
+`fc.json`. Accelerometer calibration always applies
+`(tf - accel_bias) * accel_scale`.
 `/status.json` reports both raw sensor values (for orientation setup) and
 uncalibrated `tf-*` aircraft-frame values (for IMU calibration).
 
@@ -176,11 +179,12 @@ Yaw 正角速度：  gyro.z 变为正
 运行时 IMU 数据流为：
 
 ```text
-传感器原始采样 -> fc_orientation -> 已保存的机体系零偏/比例校准 -> 陀螺仪低通 -> 姿态估计/PID
+传感器原始采样 -> fc_orientation -> 所选的机体系零偏/比例校准 -> 陀螺仪低通 -> 姿态估计/PID
 ```
 
-`fc_orientation` 之后，陀螺仪校准使用 `tf - gyro_bias`，加速度计校准使用
-`(tf - accel_bias) * accel_scale`。`/status.json` 同时提供用于安装方向设置的原始传感器数据，
+`fc_orientation` 之后，陀螺仪会根据 `gyro_bias_mode` 使用已保存的 `gyro_bias`
+或解锁前采集的运行时零偏。解锁采样只更新本次运行的控制状态，不写入 `fc.json`。
+加速度计校准始终使用 `(tf - accel_bias) * accel_scale`。`/status.json` 同时提供用于安装方向设置的原始传感器数据，
 以及用于 IMU 校准的未校准 `tf-*` 机体系数据。
 
 ## `fc_orientation` 的目标
