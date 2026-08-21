@@ -77,7 +77,7 @@ public:
     void reset();
     bool refreshReadyState();
     void update(uint32_t nowUs);
-    void updateAttitudeOnly(uint32_t nowUs, bool rcInputAvailable);
+    void updateAttitudeOnly(uint32_t nowUs);
     bool sensorsReady() const { return _sensorsReady; }
     bool ready() const { return _sensorsReady && _mixerReady && _pidReady; }
     const FlightControlAttitude &attitude() const { return _estimator.attitude(); }
@@ -91,13 +91,13 @@ private:
     void loadStickTargets(float &throttle, float &rollAngle, float &pitchAngle, float &yawRate);
     FlightControlMode readModeSwitch() const;
     void resetPidState();
-    void setSafeControlOutput();
     void resetControlState();
     void resetAttitudeState();
-    void updateArmState(bool rcInputAvailable);
+    void updateArmState();
     void beginArmGyroBiasSampling();
+    void collectArmGyroBiasSample(const FlightControlVector3 &gyroDps);
     void completeArmGyroBiasSampling();
-    bool readTransformedImu(FlightControlImuSample &sample, float dt);
+    bool readTransformedImu(FlightControlImuSample &sample, float dt, bool collectArmBiasSample);
     void filterGyro(FlightControlImuSample &sample, float dt);
 
     FlightControlSensorBackend _sensors;

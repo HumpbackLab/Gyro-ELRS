@@ -408,11 +408,6 @@ void FlightControlRuntime::resetPidState()
 void FlightControlRuntime::resetControlState()
 {
     resetPidState();
-    setSafeControlOutput();
-}
-
-void FlightControlRuntime::setSafeControlOutput()
-{
     _rollAngleTarget = _pitchAngleTarget = 0.0f;
     _rollRateTarget = _pitchRateTarget = _yawRateTarget = 0.0f;
     // Preserve the configured output count while immediately replacing every
@@ -429,6 +424,38 @@ void FlightControlRuntime::beginArmGyroBiasSampling()
     _armGyroBiasSampling = true;
 }
 
+void FlightControlRuntime::collectArmGyroBiasSample(const FlightControlVector3 &gyroDps)
+{
+    _armGyroBiasSumDps.x += gyroDps.x;
+    _armGyroBiasSumDps.y += gyroDps.y;
+    _armGyroBiasSumDps.z += gyroDps.z;
+    ++_armGyroBiasSampleCount;
+    if (_armGyroBiasSampleCount < FC_ARM_GYRO_BIAS_SAMPLE_COUNT)
+    {
+        return;
+    }
+
+    const float divisor = (float)_armGyroBiasSampleCount;
+    const FlightControlVector3 sampledBias = {
+        _armGyroBiasSumDps.x / divisor,
+        _armGyroBiasSumDps.y / divisor,
+        _armGyroBiasSumDps.z / divisor,
+    };
+    if (isfinite(sampledBias.x) && fabsf(sampledBias.x) <= 100.0f &&
+        isfinite(sampledBias.y) && fabsf(sampledBias.y) <= 100.0f &&
+        isfinite(sampledBias.z) && fabsf(sampledBias.z) <= 100.0f)
+    {
+        _armGyroBiasDps = sampledBias;
+        _armGyroBiasSampling = false;
+        return;
+    }
+
+    // Stay locked and retry with a fresh window rather than arming with an
+    // invalid bias.
+    _armGyroBiasSumDps = {};
+    _armGyroBiasSampleCount = 0;
+}
+
 void FlightControlRuntime::completeArmGyroBiasSampling()
 {
     // The learned bias changes the estimator/PID input. Discard all history
@@ -438,16 +465,12 @@ void FlightControlRuntime::completeArmGyroBiasSampling()
     _armed = true;
 }
 
-void FlightControlRuntime::updateArmState(bool rcInputAvailable)
+void FlightControlRuntime::updateArmState()
 {
-    bool armRequested = false;
-    if (rcInputAvailable)
-    {
-        const uint8_t armChannel = flightControlConfig.GetArmChannel();
-        const bool armActive = FlightControlRangeIsActive(
-            flightControlConfig.GetArmRange(), CRSF_to_US(ChannelData[armChannel]));
-        armRequested = !flightControlConfig.GetArmMode() || armActive;
-    }
+    const uint8_t armChannel = flightControlConfig.GetArmChannel();
+    const bool armActive = FlightControlRangeIsActive(
+        flightControlConfig.GetArmRange(), CRSF_to_US(ChannelData[armChannel]));
+    const bool armRequested = !flightControlConfig.GetArmMode() || armActive;
 
     if (!armRequested)
     {
@@ -456,7 +479,7 @@ void FlightControlRuntime::updateArmState(bool rcInputAvailable)
         // gyro average into the next armed session.
         _armGyroBiasSampling = false;
         _armGyroBiasSampleCount = 0;
-        setSafeControlOutput();
+        resetControlState();
         return;
     }
 
@@ -467,11 +490,10 @@ void FlightControlRuntime::updateArmState(bool rcInputAvailable)
 
     if (flightControlConfig.GetGyroBiasMode() == FLIGHT_CONTROL_GYRO_BIAS_CONFIGURED)
     {
-        // Configured calibration needs no arm-time sampling. Start the armed
-        // session with clean estimator, filter and PID history.
+        // Preserve the established configured-bias arming behavior: only
+        // controller history is reset because the estimator bias did not change.
         _armGyroBiasSampling = false;
         _armGyroBiasSampleCount = 0;
-        resetAttitudeState();
         resetControlState();
         _armed = true;
         return;
@@ -479,12 +501,12 @@ void FlightControlRuntime::updateArmState(bool rcInputAvailable)
 
     if (!_armGyroBiasSampling)
     {
-        setSafeControlOutput();
+        resetControlState();
         beginArmGyroBiasSampling();
     }
 }
 
-bool FlightControlRuntime::readTransformedImu(FlightControlImuSample &sample, float dt)
+bool FlightControlRuntime::readTransformedImu(FlightControlImuSample &sample, float dt, bool collectArmBiasSample)
 {
     // Keep a single, explicit IMU pipeline:
     // sensor/raw frame -> configured orientation transform -> saved
@@ -500,35 +522,9 @@ bool FlightControlRuntime::readTransformedImu(FlightControlImuSample &sample, fl
     const float *accelScale = flightControlConfig.GetAccelScale();
     if (sample.gyroValid)
     {
-        if (_armGyroBiasSampling)
+        if (collectArmBiasSample && _armGyroBiasSampling)
         {
-            _armGyroBiasSumDps.x += sample.gyroDps.x;
-            _armGyroBiasSumDps.y += sample.gyroDps.y;
-            _armGyroBiasSumDps.z += sample.gyroDps.z;
-            ++_armGyroBiasSampleCount;
-            if (_armGyroBiasSampleCount >= FC_ARM_GYRO_BIAS_SAMPLE_COUNT)
-            {
-                const float divisor = (float)_armGyroBiasSampleCount;
-                const float sampledBias[FC_IMU_AXIS_COUNT] = {
-                    _armGyroBiasSumDps.x / divisor,
-                    _armGyroBiasSumDps.y / divisor,
-                    _armGyroBiasSumDps.z / divisor,
-                };
-                if (isfinite(sampledBias[0]) && fabsf(sampledBias[0]) <= 100.0f &&
-                    isfinite(sampledBias[1]) && fabsf(sampledBias[1]) <= 100.0f &&
-                    isfinite(sampledBias[2]) && fabsf(sampledBias[2]) <= 100.0f)
-                {
-                    _armGyroBiasDps = {sampledBias[0], sampledBias[1], sampledBias[2]};
-                    _armGyroBiasSampling = false;
-                }
-                else
-                {
-                    // Stay locked and retry with a fresh window rather than
-                    // arming with an invalid bias.
-                    _armGyroBiasSumDps = {};
-                    _armGyroBiasSampleCount = 0;
-                }
-            }
+            collectArmGyroBiasSample(sample.gyroDps);
         }
 
         if (flightControlConfig.GetGyroBiasMode() == FLIGHT_CONTROL_GYRO_BIAS_CONFIGURED)
@@ -632,7 +628,7 @@ bool FlightControlRuntime::loadPidBank(FlightControlPid &rollPid, FlightControlP
     return true;
 }
 
-void FlightControlRuntime::updateAttitudeOnly(uint32_t nowUs, bool rcInputAvailable)
+void FlightControlRuntime::updateAttitudeOnly(uint32_t nowUs)
 {
     if (!_sensorsReady)
     {
@@ -644,8 +640,6 @@ void FlightControlRuntime::updateAttitudeOnly(uint32_t nowUs, bool rcInputAvaila
         return;
     }
 
-    updateArmState(rcInputAvailable);
-
     // FlightControl_device already schedules this function every 4 ms. Do not
     // apply a second strict microsecond gate here: millisecond scheduler jitter
     // can invoke us a few microseconds early, and rejecting that invocation
@@ -655,9 +649,8 @@ void FlightControlRuntime::updateAttitudeOnly(uint32_t nowUs, bool rcInputAvaila
     _lastUpdateUs = nowUs;
     _lastUpdateDtUs = (uint16_t)constrain(dtUs, 0U, 65535U);
 
-    const bool gyroBiasWasSampling = _armGyroBiasSampling;
     FlightControlImuSample sample = {};
-    if (!readTransformedImu(sample, dt))
+    if (!readTransformedImu(sample, dt, false))
     {
         _sensorsReady = false;
         reset();
@@ -666,17 +659,6 @@ void FlightControlRuntime::updateAttitudeOnly(uint32_t nowUs, bool rcInputAvaila
 
     _lastDebugUpdateMs = millis();
     _lastSampleAgeMs = sample.timestampMs == 0 ? 0 : (uint16_t)constrain((uint32_t)(_lastDebugUpdateMs - sample.timestampMs), 0U, 65535U);
-
-    if (gyroBiasWasSampling)
-    {
-        if (!_armGyroBiasSampling)
-        {
-            completeArmGyroBiasSampling();
-            return;
-        }
-        _estimator.update(sample, dt);
-        return;
-    }
 
     _estimator.update(sample, dt);
 }
@@ -722,7 +704,7 @@ void FlightControlRuntime::update(uint32_t nowUs)
         return;
     }
 
-    updateArmState(true);
+    updateArmState();
 
     // Timing is owned by FlightControl_device. A duplicate gate here caused
     // alternating 4/8 ms control updates when the device scheduler was only a
@@ -734,7 +716,7 @@ void FlightControlRuntime::update(uint32_t nowUs)
 
     const bool gyroBiasWasSampling = _armGyroBiasSampling;
     FlightControlImuSample sample = {};
-    if (!readTransformedImu(sample, dt))
+    if (!readTransformedImu(sample, dt, true))
     {
         _sensorsReady = false;
         reset();
@@ -748,7 +730,6 @@ void FlightControlRuntime::update(uint32_t nowUs)
         // Hold safe outputs for all 100 samples. After the average is ready,
         // discard all estimator/filter history produced before the new bias and
         // begin normal flight control on the following sample.
-        setSafeControlOutput();
         if (!_armGyroBiasSampling)
         {
             completeArmGyroBiasSampling();
