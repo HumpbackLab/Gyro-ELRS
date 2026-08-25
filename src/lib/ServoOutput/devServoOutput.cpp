@@ -9,6 +9,9 @@
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
 #include "devFlightControl.h"
 #include "FlightControlConfig.h"
+#if defined(PLATFORM_ESP32)
+#include "devWIFI.h"
+#endif
 #endif
 
 static int8_t servoPins[PWM_MAX_CHANNELS];
@@ -196,7 +199,11 @@ static void servosUpdate(unsigned long now)
 {
     static uint32_t lastUpdate;
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
-    if (connectionState == wifiUpdate)
+    if (connectionState == wifiUpdate
+#if defined(PLATFORM_ESP32)
+        || isFlightControlWifiCoexist()
+#endif
+    )
     {
         const bool outputEnabled = flightControlConfig.GetPwmOutputWifiEnabled();
         for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
