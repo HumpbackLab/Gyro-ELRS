@@ -3,99 +3,166 @@ name: Release LightFin Nano firmware
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Update channel
+        required: true
+        type: choice
+        options: [beta]
+      version:
+        description: Version shown in the beta manifest
+        required: true
+        type: string
+      ref:
+        description: Branch or commit to build
+        required: true
+        default: elrs_fc
+        type: string
 
 permissions:
   contents: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      release_version: ${{ steps.meta.outputs.release_version }}
+      source_ref: ${{ steps.meta.outputs.source_ref }}
+      published_at: ${{ steps.meta.outputs.published_at }}
+    steps:
+      - name: Resolve release channel
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ inputs.channel || 'release' }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_REF: ${{ inputs.ref }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          EVENT_PUBLISHED_AT: ${{ github.event.release.published_at }}
+        run: |
+          set -Eeuo pipefail
+          if [ "$CHANNEL" = beta ]; then
+            test -n "$INPUT_VERSION"
+            RELEASE_TAG=beta
+            RELEASE_VERSION="${INPUT_VERSION#v}"
+            SOURCE_REF="${INPUT_REF:-master}"
+            if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "Beta firmware $RELEASE_VERSION" --prerelease --target "$SOURCE_REF"
+            else
+              gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "Beta firmware $RELEASE_VERSION" --notes "Automated beta firmware build." --prerelease --target "$SOURCE_REF"
+            fi
+            PUBLISHED_AT="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.published_at // .created_at')"
+          else
+            RELEASE_TAG="$EVENT_TAG"
+            RELEASE_VERSION="$RELEASE_TAG"
+            SOURCE_REF="$RELEASE_TAG"
+            PUBLISHED_AT="$EVENT_PUBLISHED_AT"
+          fi
+          {
+            echo "release_tag=$RELEASE_TAG"
+            echo "release_version=$RELEASE_VERSION"
+            echo "source_ref=$SOURCE_REF"
+            echo "published_at=$PUBLISHED_AT"
+          } >> "$GITHUB_OUTPUT"
+
   build-and-upload:
+    needs: prepare
+    if: github.event_name != 'release' || github.event.release.tag_name != 'beta'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout release source
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
-
+          ref: ${{ needs.prepare.outputs.source_ref }}
       - name: Checkout hardware targets
         uses: actions/checkout@v4
         with:
           repository: HumpbackLab/GYRO-ELRS-Targets
           path: src/hardware
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-
       - name: Cache PlatformIO
         uses: actions/cache@v4
         with:
           path: ~/.platformio
           key: ${{ runner.os }}-platformio-lightfin-nano
-
       - name: Install PlatformIO
         run: |
           python -m pip install --upgrade pip
           pip install platformio wheel
-
       - name: Build configured firmware
         id: build
         env:
-          RELEASE_VERSION: ${{ github.event.release.tag_name }}
-          PUBLISHED_AT: ${{ github.event.release.published_at }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
         run: |
+          set -Eeuo pipefail
           cd src
           sed -i '/^\[env:Unified_ESP32C3_2400_RX_via_WIFI\]$/a board_config = jumper.rx_2400.lightfin-nano' targets/unified.ini
           PLATFORMIO_BUILD_FLAGS="-DRegulatory_Domain_ISM_2400" pio run -e Unified_ESP32C3_2400_RX_via_WIFI
-
           PRODUCT_NAME=$(jq -er '.jumper.rx_2400["lightfin-nano"].product_name' hardware/targets.json)
           SAFE_VERSION=${RELEASE_VERSION//\//-}
           ASSET_PRODUCT_NAME=${PRODUCT_NAME// /.}
           ASSET_NAME="${ASSET_PRODUCT_NAME}_${SAFE_VERSION}.bin"
           mkdir -p ../release-assets
-          cp .pio/build/Unified_ESP32C3_2400_RX_via_WIFI/firmware.bin "../release-assets/${ASSET_NAME}"
-          ASSET_SIZE=$(stat -c%s "../release-assets/${ASSET_NAME}")
-          ASSET_SHA256=$(sha256sum "../release-assets/${ASSET_NAME}" | cut -d' ' -f1)
-          ENCODED_TAG=$(jq -rn --arg value "$RELEASE_VERSION" '$value|@uri')
-          ENCODED_ASSET=$(jq -rn --arg value "$ASSET_NAME" '$value|@uri')
-          GITHUB_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${ENCODED_TAG}/${ENCODED_ASSET}"
-          GITEE_URL="https://gitee.com/ncer/Gyro-ELRS/releases/download/${ENCODED_TAG}/${ENCODED_ASSET}"
-
-          jq -n \
-            --arg version "$RELEASE_VERSION" \
-            --arg published_at "$PUBLISHED_AT" \
-            --arg product_name "$PRODUCT_NAME" \
-            --arg target "Unified_ESP32C3_2400_RX" \
-            --arg filename "$ASSET_NAME" \
-            --arg sha256 "$ASSET_SHA256" \
-            --arg github_url "$GITHUB_URL" \
-            --arg gitee_url "$GITEE_URL" \
-            --argjson size "$ASSET_SIZE" \
-            '{schema: 1, version: $version, published_at: $published_at, firmwares: [{product_name: $product_name, target: $target, filename: $filename, size: $size, sha256: $sha256, sources: {github: $github_url, gitee: $gitee_url}}]}' \
-            > ../release-assets/firmware-latest.json
-
-          echo "asset=release-assets/${ASSET_NAME}" >> "$GITHUB_OUTPUT"
-          echo "manifest=release-assets/firmware-latest.json" >> "$GITHUB_OUTPUT"
-
-      - name: Upload firmware and manifest to GitHub release
+          ASSET_PATH="../release-assets/${ASSET_NAME}"
+          cp .pio/build/Unified_ESP32C3_2400_RX_via_WIFI/firmware.bin "$ASSET_PATH"
+          {
+            echo "asset=release-assets/$ASSET_NAME"
+            echo "asset_name=$ASSET_NAME"
+            echo "product_name=$PRODUCT_NAME"
+            echo "asset_size=$(stat -c%s "$ASSET_PATH")"
+            echo "asset_sha256=$(sha256sum "$ASSET_PATH" | cut -d' ' -f1)"
+          } >> "$GITHUB_OUTPUT"
+      - name: Upload firmware asset
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
           ASSET_PATH: ${{ steps.build.outputs.asset }}
-          MANIFEST_PATH: ${{ steps.build.outputs.manifest }}
-        run: gh release upload "$RELEASE_TAG" "$ASSET_PATH" "$MANIFEST_PATH" --clobber
+        run: gh release upload "$RELEASE_TAG" "$ASSET_PATH" --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Generate and upload update manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ inputs.channel || 'release' }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
+          PUBLISHED_AT: ${{ needs.prepare.outputs.published_at }}
+          ASSET_NAME: ${{ steps.build.outputs.asset_name }}
+          PRODUCT_NAME: ${{ steps.build.outputs.product_name }}
+          ASSET_SIZE: ${{ steps.build.outputs.asset_size }}
+          ASSET_SHA256: ${{ steps.build.outputs.asset_sha256 }}
+        run: |
+          set -Eeuo pipefail
+          GITHUB_URL="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq ".assets[] | select(.name == \"$ASSET_NAME\") | .browser_download_url")"
+          test -n "$GITHUB_URL"
+          BETA_URL=""
+          GITEE_URL=""
+          if [ "$CHANNEL" = beta ]; then
+            BETA_URL="$GITHUB_URL"
+          else
+            ENCODED_TAG=$(jq -rn --arg value "$RELEASE_TAG" '$value|@uri')
+            ENCODED_ASSET=$(jq -rn --arg value "$ASSET_NAME" '$value|@uri')
+            GITEE_URL="https://gitee.com/ncer/Gyro-ELRS/releases/download/${ENCODED_TAG}/${ENCODED_ASSET}"
+          fi
+          mkdir -p release-assets
+          jq -n --arg version "$RELEASE_VERSION" --arg published_at "$PUBLISHED_AT" --arg product_name "$PRODUCT_NAME" --arg target "Unified_ESP32C3_2400_RX" --arg filename "$ASSET_NAME" --arg sha256 "$ASSET_SHA256" --arg github_url "$GITHUB_URL" --arg gitee_url "$GITEE_URL" --arg beta_url "$BETA_URL" --argjson size "$ASSET_SIZE" \
+            '{schema: 1, version: $version, published_at: $published_at, firmwares: [{product_name: $product_name, target: $target, filename: $filename, size: $size, sha256: $sha256, sources: {github: $github_url, gitee: $gitee_url, beta: $beta_url}}]}' \
+            > release-assets/firmware-latest.json
+          gh release upload "$RELEASE_TAG" release-assets/firmware-latest.json --repo "$GITHUB_REPOSITORY" --clobber
 
   sync-gitee:
     name: Sync firmware to Gitee
-    needs: build-and-upload
+    needs: [prepare, build-and-upload]
+    if: github.event_name == 'release' && github.event.release.tag_name != 'beta'
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
-
+          ref: ${{ needs.prepare.outputs.source_ref }}
       - name: Sync firmware and manifest to Gitee
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -103,7 +170,4 @@ jobs:
           GITEE_FIRMWARE_REPOSITORY: ncer/Gyro-ELRS
           GITEE_FIRMWARE_BRANCH: elrs_fc
         run: |
-          ./scripts/sync-firmware-to-gitee.sh \
-            "${{ github.repository }}" \
-            "$GITEE_FIRMWARE_REPOSITORY" \
-            "${{ github.event.release.tag_name }}"
+          ./scripts/sync-firmware-to-gitee.sh "${{ github.repository }}" "$GITEE_FIRMWARE_REPOSITORY" "${{ needs.prepare.outputs.release_tag }}"
