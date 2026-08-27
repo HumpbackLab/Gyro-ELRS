@@ -6,6 +6,7 @@
 #include "deferred.h"
 #if defined(HAS_BASIC_FLIGHT_CONTROL)
 #include "FlightControlConfig.h"
+#include "devFlightControl.h"
 #endif
 
 #define RX_HAS_SERIAL1 (GPIO_PIN_SERIAL1_TX != UNDEF_PIN || OPT_HAS_SERVO_OUTPUT)
@@ -126,17 +127,17 @@ static struct luaItem_folder luaFlightControlFolder = {
     {"Flight Control", CRSF_FOLDER},
 };
 
-static struct luaItem_folder luaFlightControlRateFolder = {
-    {"Rate PID (/100)", CRSF_FOLDER},
+static struct luaItem_folder luaFlightControlSensitivityFolder = {
+    {"Sensitivity", CRSF_FOLDER},
 };
 
-static struct luaItem_folder luaFlightControlAngleFolder = {
-    {"Angle PID (/100)", CRSF_FOLDER},
+static constexpr uint8_t LUA_FC_SENSITIVITY_AXES = 3;
+static constexpr uint8_t LUA_FC_SENSITIVITY_MIN = 1;
+static constexpr uint8_t LUA_FC_SENSITIVITY_MAX = 10;
+static constexpr int16_t LUA_FC_RATE_PID_BASE[] = {200, 60, 5}; // Kp, Ki, Kd at level 5
+static constexpr uint16_t LUA_FC_SENSITIVITY_GAIN_PERMILLE[] = {
+    500, 625, 750, 875, 1000, 1200, 1400, 1600, 1800, 2000,
 };
-
-static constexpr uint8_t LUA_FC_PID_COLUMNS = 4;
-static constexpr uint8_t LUA_FC_PID_AXES = FC_PID_TERM_COUNT / LUA_FC_PID_COLUMNS;
-static_assert(FC_PID_TERM_COUNT % LUA_FC_PID_COLUMNS == 0, "PID terms must contain complete axes");
 
 static struct luaItem_selection luaFlightControlRateAxis = {
     {"Axis", CRSF_TEXT_SELECTION},
@@ -145,91 +146,43 @@ static struct luaItem_selection luaFlightControlRateAxis = {
     STR_EMPTYSPACE
 };
 
-static struct luaItem_selection luaFlightControlAngleAxis = {
-    {"Axis", CRSF_TEXT_SELECTION},
-    0,
-    "Roll;Pitch;Yaw",
+static struct luaItem_int8 luaFlightControlSensitivity = {
+    {"Level", CRSF_INT8},
+    {
+        {
+            5,
+            LUA_FC_SENSITIVITY_MIN,
+            LUA_FC_SENSITIVITY_MAX,
+        }
+    },
     STR_EMPTYSPACE
 };
 
-static struct luaItem_selection luaFlightControlModeEnabled[] = {
-    {
-        {"Rate Mode", CRSF_TEXT_SELECTION},
-        1,
-        "Off;On",
-        STR_EMPTYSPACE
-    },
-    {
-        {"Angle Mode", CRSF_TEXT_SELECTION},
-        0,
-        "Off;On",
-        STR_EMPTYSPACE
-    },
-};
-
-static struct luaItem_selection luaFlightControlModeChannels[] = {
-    {
-        {"Rate Channel", CRSF_TEXT_SELECTION},
-        1,
-        "AUX1;AUX2;AUX3;AUX4;AUX5;AUX6;AUX7;AUX8;AUX9;AUX10;AUX11;AUX12",
-        STR_EMPTYSPACE
-    },
-    {
-        {"Angle Channel", CRSF_TEXT_SELECTION},
-        1,
-        "AUX1;AUX2;AUX3;AUX4;AUX5;AUX6;AUX7;AUX8;AUX9;AUX10;AUX11;AUX12",
-        STR_EMPTYSPACE
-    },
-};
-
-static struct luaItem_selection luaFlightControlArmEnabled = {
-    {"Arm Switch", CRSF_TEXT_SELECTION},
+static struct luaItem_selection luaFlightControlReverseFeedback = {
+    {"Reverse Feedback", CRSF_TEXT_SELECTION},
     0,
     "Off;On",
     STR_EMPTYSPACE
 };
 
-static struct luaItem_selection luaFlightControlArmChannel = {
-    {"Arm Channel", CRSF_TEXT_SELECTION},
+static struct luaItem_selection luaFlightControlServoDebounce = {
+    {"Servo Debounce", CRSF_TEXT_SELECTION},
     0,
-    "AUX1;AUX2;AUX3;AUX4;AUX5;AUX6;AUX7;AUX8;AUX9;AUX10;AUX11;AUX12",
+    "Off;On",
     STR_EMPTYSPACE
 };
 
-static struct luaItem_command luaFlightControlSave = {
-    {"Save FC Params", CRSF_COMMAND},
-    lcsIdle,
-    STR_EMPTYSPACE
+static struct luaItem_string luaFlightControlMode = {
+    {"Current Mode", CRSF_INFO},
+    "Unknown"
 };
 
-#define LUA_PID_INT16_ITEM(label) \
-{ \
-  {label, CRSF_INT16}, \
-  { \
-    { \
-      (uint16_t)0, \
-      (uint16_t)0, \
-      htobe16(20000), \
-    } \
-  }, \
-  STR_EMPTYSPACE \
-}
-
-static struct luaItem_int16 luaFlightControlRatePid[] = {
-    LUA_PID_INT16_ITEM("Kp"),
-    LUA_PID_INT16_ITEM("Ki"),
-    LUA_PID_INT16_ITEM("Kd"),
-    LUA_PID_INT16_ITEM("ILim"),
+static struct luaItem_string luaFlightControlArmed = {
+    {"Armed", CRSF_INFO},
+    "Unknown"
 };
 
-static struct luaItem_int16 luaFlightControlAnglePid[] = {
-    LUA_PID_INT16_ITEM("Kp"),
-    LUA_PID_INT16_ITEM("Ki"),
-    LUA_PID_INT16_ITEM("Kd"),
-    LUA_PID_INT16_ITEM("ILim"),
-};
 
-#undef LUA_PID_INT16_ITEM
 #endif
 
 //----------------------------Info-----------------------------------
@@ -320,99 +273,82 @@ static struct luaItem_command luaBindMode = {
 };
 
 #if defined(HAS_BASIC_FLIGHT_CONTROL)
-static int findFlightControlPidIndex(const struct luaPropertiesCommon *item, const struct luaItem_int16 *items, uint8_t count)
+static uint8_t flightControlSensitivityLevel(uint8_t axis)
 {
-  for (uint8_t i = 0; i < count; ++i)
+  if (axis >= LUA_FC_SENSITIVITY_AXES) return 5;
+  const int16_t kp = flightControlConfig.GetRatePid()[axis * 4];
+  if (kp == 0) return 5;
+  const uint16_t magnitude = (uint16_t)abs(kp);
+  uint8_t closest = 0;
+  uint32_t closestDistance = UINT32_MAX;
+  for (uint8_t index = 0; index < LUA_FC_SENSITIVITY_MAX; ++index)
   {
-    if (&items[i].common == item)
+    const uint32_t expected = (uint32_t)LUA_FC_RATE_PID_BASE[0] * LUA_FC_SENSITIVITY_GAIN_PERMILLE[index] / 1000U;
+    const uint32_t distance = magnitude > expected ? magnitude - expected : expected - magnitude;
+    if (distance < closestDistance)
     {
-      return i;
+      closest = index;
+      closestDistance = distance;
     }
   }
-
-  return -1;
+  return closest + 1;
 }
 
-static void updateFlightControlPidFields(struct luaItem_int16 *items, const int16_t *pid, uint8_t axis)
+static void updateFlightControlSensitivity()
 {
-  if (axis >= LUA_FC_PID_AXES)
+  const uint8_t axis = luaFlightControlRateAxis.value;
+  if (axis >= LUA_FC_SENSITIVITY_AXES) return;
+  const int16_t *pid = flightControlConfig.GetRatePid();
+  const uint8_t offset = axis * 4;
+  setLuaUint8Value(&luaFlightControlSensitivity, flightControlSensitivityLevel(axis));
+  setLuaTextSelectionValue(&luaFlightControlReverseFeedback, pid[offset] < 0 ? 1 : 0);
+  setLuaTextSelectionValue(&luaFlightControlServoDebounce, pid[offset + 2] == 0 ? 1 : 0);
+}
+
+static void updateFlightControlStatus()
+{
+  FlightControlDebugSnapshot snapshot = {};
+  if (!flightControlGetDebugSnapshot(snapshot))
   {
+    setLuaStringValue(&luaFlightControlMode, "Unknown");
+    setLuaStringValue(&luaFlightControlArmed, "Unknown");
     return;
   }
 
-  const uint8_t offset = axis * LUA_FC_PID_COLUMNS;
-  for (uint8_t i = 0; i < LUA_FC_PID_COLUMNS; ++i)
-  {
-    setLuaInt16Value(&items[i], pid[offset + i]);
-  }
+  const char *mode = snapshot.mode == FLIGHT_CONTROL_MODE_ANGLE ? "Angle"
+    : snapshot.mode == FLIGHT_CONTROL_MODE_RATE ? "Rate" : "Manual";
+  const char *armed = snapshot.armed ? "Yes" : "No";
+  setLuaStringValue(&luaFlightControlMode, mode);
+  setLuaStringValue(&luaFlightControlArmed, armed);
 }
 
-static void luaparamFlightControlRatePid(struct luaPropertiesCommon *item, uint8_t arg)
+static void applyFlightControlSensitivity(uint8_t level)
 {
-  UNUSED(arg);
-  int16_t value;
-  const int term = findFlightControlPidIndex(item, luaFlightControlRatePid, LUA_FC_PID_COLUMNS);
-  if (term >= 0 && luaGetUpdateValueInt16(&value))
+  const uint8_t axis = luaFlightControlRateAxis.value;
+  if (axis >= LUA_FC_SENSITIVITY_AXES) return;
+
+  level = constrain(level, LUA_FC_SENSITIVITY_MIN, LUA_FC_SENSITIVITY_MAX);
+  const uint8_t offset = axis * 4;
+  const uint16_t gain = LUA_FC_SENSITIVITY_GAIN_PERMILLE[level - 1];
+  const int16_t sign = luaFlightControlReverseFeedback.value ? -1 : 1;
+  flightControlConfig.SetRatePid(offset, sign * (LUA_FC_RATE_PID_BASE[0] * gain / 1000U));
+  flightControlConfig.SetRatePid(offset + 1, sign * (LUA_FC_RATE_PID_BASE[1] * gain / 1000U));
+  flightControlConfig.SetRatePid(offset + 2, luaFlightControlServoDebounce.value
+    ? 0
+    : sign * (LUA_FC_RATE_PID_BASE[2] * gain / 1000U));
+  if (flightControlConfig.Commit())
   {
-    const uint8_t index = luaFlightControlRateAxis.value * LUA_FC_PID_COLUMNS + term;
-    flightControlConfig.SetRatePid(index, value);
-    if (flightControlConfig.Commit())
-    {
-      setLuaInt16Value(&luaFlightControlRatePid[term], value);
-      devicesTriggerEvent();
-    }
+    updateFlightControlSensitivity();
+    devicesTriggerEvent();
   }
 }
 
-static void luaparamFlightControlAnglePid(struct luaPropertiesCommon *item, uint8_t arg)
+static void luaparamFlightControlSensitivity(struct luaPropertiesCommon *item, uint8_t arg)
 {
-  UNUSED(arg);
-  int16_t value;
-  const int term = findFlightControlPidIndex(item, luaFlightControlAnglePid, LUA_FC_PID_COLUMNS);
-  if (term >= 0 && luaGetUpdateValueInt16(&value))
-  {
-    const uint8_t index = luaFlightControlAngleAxis.value * LUA_FC_PID_COLUMNS + term;
-    flightControlConfig.SetAnglePid(index, value);
-    if (flightControlConfig.Commit())
-    {
-      setLuaInt16Value(&luaFlightControlAnglePid[term], value);
-      devicesTriggerEvent();
-    }
-  }
+  UNUSED(item);
+  applyFlightControlSensitivity(arg);
 }
 
-static void luaparamFlightControlSave(struct luaPropertiesCommon *item, uint8_t arg)
-{
-  luaCmdStep_e newStep;
-  const char *msg;
-
-  if (arg == lcsClick)
-  {
-    newStep = lcsAskConfirm;
-    msg = "Save FC params?";
-  }
-  else if (arg == lcsConfirmed)
-  {
-    if (flightControlConfig.IsModified())
-    {
-      flightControlConfig.Commit();
-      newStep = lcsExecuting;
-      msg = "Saving...";
-    }
-    else
-    {
-      newStep = lcsIdle;
-      msg = "No changes";
-    }
-  }
-  else
-  {
-    newStep = lcsIdle;
-    msg = STR_EMPTYSPACE;
-  }
-
-  sendLuaCommandResponse((struct luaItem_command *)item, newStep, msg);
-}
 #endif
 
 #if defined(GPIO_PIN_PWM_OUTPUTS)
@@ -796,65 +732,31 @@ static void registerLuaParameters()
 
 #if defined(HAS_BASIC_FLIGHT_CONTROL)
   registerLUAParameter(&luaFlightControlFolder);
-  registerLUAParameter(&luaFlightControlModeEnabled[0], [](struct luaPropertiesCommon* item, uint8_t arg) {
-    UNUSED(item);
-    flightControlConfig.SetModeEnabled(FLIGHT_CONTROL_MODE_RATE, arg != 0);
-    flightControlConfig.Commit();
-  }, luaFlightControlFolder.common.id);
-  registerLUAParameter(&luaFlightControlModeChannels[0], [](struct luaPropertiesCommon* item, uint8_t arg) {
-    UNUSED(item);
-    flightControlConfig.SetModeChannel(FLIGHT_CONTROL_MODE_RATE, arg + FC_MODE_CHANNEL_MIN);
-    flightControlConfig.Commit();
-  }, luaFlightControlFolder.common.id);
-  registerLUAParameter(&luaFlightControlModeEnabled[1], [](struct luaPropertiesCommon* item, uint8_t arg) {
-    UNUSED(item);
-    flightControlConfig.SetModeEnabled(FLIGHT_CONTROL_MODE_ANGLE, arg != 0);
-    flightControlConfig.Commit();
-  }, luaFlightControlFolder.common.id);
-  registerLUAParameter(&luaFlightControlModeChannels[1], [](struct luaPropertiesCommon* item, uint8_t arg) {
-    UNUSED(item);
-    flightControlConfig.SetModeChannel(FLIGHT_CONTROL_MODE_ANGLE, arg + FC_MODE_CHANNEL_MIN);
-    flightControlConfig.Commit();
-  }, luaFlightControlFolder.common.id);
-  registerLUAParameter(&luaFlightControlArmEnabled, [](struct luaPropertiesCommon* item, uint8_t arg) {
-    UNUSED(item);
-    flightControlConfig.SetArmMode(arg != 0);
-    flightControlConfig.Commit();
-  }, luaFlightControlFolder.common.id);
-  registerLUAParameter(&luaFlightControlArmChannel, [](struct luaPropertiesCommon* item, uint8_t arg) {
-    UNUSED(item);
-    flightControlConfig.SetArmChannel(arg + FC_MODE_CHANNEL_MIN);
-    flightControlConfig.Commit();
-  }, luaFlightControlFolder.common.id);
-  registerLUAParameter(&luaFlightControlSave, &luaparamFlightControlSave, luaFlightControlFolder.common.id);
-  registerLUAParameter(&luaFlightControlRateFolder, nullptr, luaFlightControlFolder.common.id);
+  registerLUAParameter(&luaFlightControlMode, nullptr, luaFlightControlFolder.common.id);
+  registerLUAParameter(&luaFlightControlArmed, nullptr, luaFlightControlFolder.common.id);
+  registerLUAParameter(&luaFlightControlSensitivityFolder, nullptr, luaFlightControlFolder.common.id);
   registerLUAParameter(&luaFlightControlRateAxis, [](struct luaPropertiesCommon* item, uint8_t arg) {
     UNUSED(item);
-    if (arg >= LUA_FC_PID_AXES)
+    if (arg >= LUA_FC_SENSITIVITY_AXES)
     {
       return;
     }
     setLuaTextSelectionValue(&luaFlightControlRateAxis, arg);
-    updateFlightControlPidFields(luaFlightControlRatePid, flightControlConfig.GetRatePid(), arg);
-  }, luaFlightControlRateFolder.common.id);
-  for (uint8_t i = 0; i < LUA_FC_PID_COLUMNS; ++i)
-  {
-    registerLUAParameter(&luaFlightControlRatePid[i], &luaparamFlightControlRatePid, luaFlightControlRateFolder.common.id);
-  }
-  registerLUAParameter(&luaFlightControlAngleFolder, nullptr, luaFlightControlFolder.common.id);
-  registerLUAParameter(&luaFlightControlAngleAxis, [](struct luaPropertiesCommon* item, uint8_t arg) {
+    updateFlightControlSensitivity();
+  }, luaFlightControlSensitivityFolder.common.id);
+  registerLUAParameter(&luaFlightControlSensitivity, &luaparamFlightControlSensitivity,
+    luaFlightControlSensitivityFolder.common.id);
+  registerLUAParameter(&luaFlightControlReverseFeedback, [](struct luaPropertiesCommon* item, uint8_t arg) {
     UNUSED(item);
-    if (arg >= LUA_FC_PID_AXES)
-    {
-      return;
-    }
-    setLuaTextSelectionValue(&luaFlightControlAngleAxis, arg);
-    updateFlightControlPidFields(luaFlightControlAnglePid, flightControlConfig.GetAnglePid(), arg);
-  }, luaFlightControlAngleFolder.common.id);
-  for (uint8_t i = 0; i < LUA_FC_PID_COLUMNS; ++i)
-  {
-    registerLUAParameter(&luaFlightControlAnglePid[i], &luaparamFlightControlAnglePid, luaFlightControlAngleFolder.common.id);
-  }
+    setLuaTextSelectionValue(&luaFlightControlReverseFeedback, arg != 0 ? 1 : 0);
+    applyFlightControlSensitivity(luaFlightControlSensitivity.properties.u.value);
+  }, luaFlightControlSensitivityFolder.common.id);
+  registerLUAParameter(&luaFlightControlServoDebounce, [](struct luaPropertiesCommon* item, uint8_t arg) {
+    UNUSED(item);
+    setLuaTextSelectionValue(&luaFlightControlServoDebounce, arg != 0 ? 1 : 0);
+    applyFlightControlSensitivity(luaFlightControlSensitivity.properties.u.value);
+  }, luaFlightControlSensitivityFolder.common.id);
+  updateFlightControlSensitivity();
 #endif
 
 #if defined(GPIO_PIN_PWM_OUTPUTS)
@@ -927,17 +829,8 @@ static int event()
   setLuaTextSelectionValue(&luaTeamracePosition, config.GetTeamracePosition());
 
 #if defined(HAS_BASIC_FLIGHT_CONTROL)
-  setLuaTextSelectionValue(&luaFlightControlModeEnabled[0], flightControlConfig.GetModeEnabled(FLIGHT_CONTROL_MODE_RATE) ? 1 : 0);
-  setLuaTextSelectionValue(&luaFlightControlModeChannels[0], flightControlConfig.GetModeChannel(FLIGHT_CONTROL_MODE_RATE) - FC_MODE_CHANNEL_MIN);
-  setLuaTextSelectionValue(&luaFlightControlModeEnabled[1], flightControlConfig.GetModeEnabled(FLIGHT_CONTROL_MODE_ANGLE) ? 1 : 0);
-  setLuaTextSelectionValue(&luaFlightControlModeChannels[1], flightControlConfig.GetModeChannel(FLIGHT_CONTROL_MODE_ANGLE) - FC_MODE_CHANNEL_MIN);
-  setLuaTextSelectionValue(&luaFlightControlArmEnabled, flightControlConfig.GetArmMode() ? 1 : 0);
-  setLuaTextSelectionValue(&luaFlightControlArmChannel, flightControlConfig.GetArmChannel() - FC_MODE_CHANNEL_MIN);
-  if (!flightControlConfig.IsModified())
-  {
-    updateFlightControlPidFields(luaFlightControlRatePid, flightControlConfig.GetRatePid(), luaFlightControlRateAxis.value);
-    updateFlightControlPidFields(luaFlightControlAnglePid, flightControlConfig.GetAnglePid(), luaFlightControlAngleAxis.value);
-  }
+  updateFlightControlStatus();
+  updateFlightControlSensitivity();
 #endif
 
 #if defined(GPIO_PIN_PWM_OUTPUTS)
