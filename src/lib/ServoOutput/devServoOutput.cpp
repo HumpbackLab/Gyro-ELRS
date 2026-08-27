@@ -199,13 +199,13 @@ static void servosUpdate(unsigned long now)
 {
     static uint32_t lastUpdate;
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+    const bool outputEnabled = flightControlConfig.GetPwmOutputWifiEnabled();
     if (connectionState == wifiUpdate
 #if defined(PLATFORM_ESP32)
-        || isFlightControlWifiCoexist()
+        || (isFlightControlWifiCoexist() && outputEnabled)
 #endif
     )
     {
-        const bool outputEnabled = flightControlConfig.GetPwmOutputWifiEnabled();
         for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
         {
             const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
