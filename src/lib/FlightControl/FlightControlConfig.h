@@ -31,10 +31,10 @@ constexpr uint16_t FC_PWM_LIMIT_DEFAULT_CENTER_US = 1500;
 constexpr uint16_t FC_PWM_LIMIT_DEFAULT_MAX_US = 2000;
 constexpr uint8_t FC_DTERM_LPF_MIN_HZ = 5;
 constexpr uint8_t FC_DTERM_LPF_MAX_HZ = 100;
-constexpr uint8_t FC_DTERM_LPF_DEFAULT_HZ = 20;
+constexpr uint8_t FC_DTERM_LPF_DEFAULT_HZ = 0;
 constexpr uint8_t FC_GYRO_LPF_MIN_HZ = 5;
 constexpr uint8_t FC_GYRO_LPF_MAX_HZ = 100;
-constexpr uint8_t FC_GYRO_LPF_DEFAULT_HZ = 30;
+constexpr uint8_t FC_GYRO_LPF_DEFAULT_HZ = 0;
 
 enum FlightControlMode : uint8_t
 {
