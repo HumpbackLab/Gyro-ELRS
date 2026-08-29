@@ -322,6 +322,21 @@ static void updateFlightControlStatus()
   setLuaStringValue(&luaFlightControlArmed, armed);
 }
 
+static constexpr uint32_t LUA_FLIGHT_CONTROL_STATUS_REFRESH_INTERVAL_MS = 250;
+static uint32_t luaFlightControlStatusLastUpdateMs = 0;
+
+static void refreshFlightControlStatus()
+{
+  const uint32_t now = millis();
+  if ((uint32_t)(now - luaFlightControlStatusLastUpdateMs) < LUA_FLIGHT_CONTROL_STATUS_REFRESH_INTERVAL_MS)
+  {
+    return;
+  }
+
+  luaFlightControlStatusLastUpdateMs = now;
+  updateFlightControlStatus();
+}
+
 static void applyFlightControlSensitivity(uint8_t level)
 {
   const uint8_t axis = luaFlightControlRateAxis.value;
@@ -876,6 +891,9 @@ static int event()
 static int timeout()
 {
   luaHandleUpdateParameter();
+#if defined(HAS_BASIC_FLIGHT_CONTROL)
+  refreshFlightControlStatus();
+#endif
   // Receivers can only `UpdateParamReq == true` every 4th packet due to the transmitter cadence in 1:2
   // Channels, Downlink Telemetry Slot, Uplink Telemetry (the write command), Downlink Telemetry Slot...
   // (interval * 4 / 1000) or 1 second if not connected
