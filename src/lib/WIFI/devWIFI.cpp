@@ -1803,8 +1803,8 @@ static void addCaptivePortalHandlers()
     // A 404 stops win 10 keep calling this repeatedly and panicking the esp32
     server.on("/wpad.dat", [](AsyncWebServerRequest *request) { request->send(404); });
 
-    server.on("/generate_204", WebUpdateHandleRoot); // Android
-    server.on("/gen_204", WebUpdateHandleRoot); // Android
+    server.on("/generate_204", [](AsyncWebServerRequest *request) { request->send(204); }); // Android
+    server.on("/gen_204", [](AsyncWebServerRequest *request) { request->send(204); }); // Android
     server.on("/library/test/success.html", WebUpdateHandleRoot); // apple call home
     server.on("/hotspot-detect.html", WebUpdateHandleRoot); // apple call home
     server.on("/connectivity-check.html", WebUpdateHandleRoot); // ubuntu
