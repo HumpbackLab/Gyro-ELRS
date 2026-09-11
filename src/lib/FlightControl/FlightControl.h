@@ -128,6 +128,8 @@ private:
     uint8_t _armGyroBiasSampleCount = 0;
     uint8_t _gyroFilterHz = 0;
     FlightControlMode _mode = FLIGHT_CONTROL_MODE_MANUAL;
+    uint32_t _lastAngleUpdateUs = 0;
+    bool _angleLoopInitialized = false;
     float _rollAngleTarget = 0.0f;
     float _pitchAngleTarget = 0.0f;
     float _rollRateTarget = 0.0f;
