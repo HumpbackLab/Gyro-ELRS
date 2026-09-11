@@ -160,8 +160,8 @@ void Gyro_SC7U22::initialize()
 
 uint8_t Gyro_SC7U22::getGyroDuration()
 {
-    // 250Hz gyro poll rate (4ms). I2C read takes ~400us at 400kHz,
-    // leaving ~3.6ms per cycle for WiFi, PWM, and FC computation.
+    // Legacy millisecond API. SC7U22 is scheduled through the microsecond
+    // device callback in devGyro.cpp.
     return 4;
 }
 

@@ -10,7 +10,8 @@
 #include <Arduino.h>
 #include <math.h>
 
-static constexpr uint32_t FC_UPDATE_INTERVAL_US = 4000;
+static constexpr uint32_t FC_UPDATE_INTERVAL_US = 1250;
+static constexpr uint32_t FC_ANGLE_UPDATE_INTERVAL_US = 12500;
 static constexpr float FC_MAX_ROLL_PITCH_DEG = 35.0f;
 static constexpr float FC_MAX_RATE_DPS = 180.0f;
 static constexpr float FC_COMPLEMENTARY_ALPHA = 0.98f;
@@ -392,6 +393,8 @@ void FlightControlRuntime::resetAttitudeState()
     _lastUpdateDtUs = 0;
     _lastSampleAgeMs = 0;
     _lastUpdateUs = 0;
+    _lastAngleUpdateUs = 0;
+    _angleLoopInitialized = false;
     _gyroFilterInitialized = false;
 }
 
@@ -408,6 +411,8 @@ void FlightControlRuntime::resetPidState()
 void FlightControlRuntime::resetControlState()
 {
     resetPidState();
+    _lastAngleUpdateUs = 0;
+    _angleLoopInitialized = false;
     _rollAngleTarget = _pitchAngleTarget = 0.0f;
     _rollRateTarget = _pitchRateTarget = _yawRateTarget = 0.0f;
     // Preserve the configured output count while immediately replacing every
@@ -640,10 +645,10 @@ void FlightControlRuntime::updateAttitudeOnly(uint32_t nowUs)
         return;
     }
 
-    // FlightControl_device already schedules this function every 4 ms. Do not
+    // FlightControl_device already schedules this function every 1.25 ms. Do not
     // apply a second strict microsecond gate here: millisecond scheduler jitter
     // can invoke us a few microseconds early, and rejecting that invocation
-    // turns an otherwise valid 4 ms update into an 8 ms gap.
+    // turns an otherwise valid 1.25 ms update into a 2.5 ms gap.
     const uint32_t dtUs = _lastUpdateUs == 0 ? FC_UPDATE_INTERVAL_US : (uint32_t)(nowUs - _lastUpdateUs);
     const float dt = dtUs * 1e-6f;
     _lastUpdateUs = nowUs;
@@ -707,7 +712,7 @@ void FlightControlRuntime::update(uint32_t nowUs)
     updateArmState();
 
     // Timing is owned by FlightControl_device. A duplicate gate here caused
-    // alternating 4/8 ms control updates when the device scheduler was only a
+    // alternating 1.25/2.5 ms control updates when the device scheduler was only a
     // few microseconds early.
     const uint32_t dtUs = _lastUpdateUs == 0 ? FC_UPDATE_INTERVAL_US : (uint32_t)(nowUs - _lastUpdateUs);
     const float dt = dtUs * 1e-6f;
@@ -749,6 +754,8 @@ void FlightControlRuntime::update(uint32_t nowUs)
     {
         resetPidState();
         _mode = nextMode;
+        _lastAngleUpdateUs = 0;
+        _angleLoopInitialized = false;
     }
 
     float throttle;
@@ -775,14 +782,33 @@ void FlightControlRuntime::update(uint32_t nowUs)
 
     if (_mode == FLIGHT_CONTROL_MODE_ANGLE)
     {
-        rollRateTarget = constrain(
-            _rollAnglePid.update(rollAngleTarget, _estimator.attitude().rollDeg, dt),
-            -(float)flightControlConfig.GetAngleRateLimitDps(0),
-            (float)flightControlConfig.GetAngleRateLimitDps(0));
-        pitchRateTarget = constrain(
-            _pitchAnglePid.update(pitchAngleTarget, _estimator.attitude().pitchDeg, dt),
-            -(float)flightControlConfig.GetAngleRateLimitDps(1),
-            (float)flightControlConfig.GetAngleRateLimitDps(1));
+        // Run the attitude outer loop at 80 Hz while keeping the rate loop
+        // and mixer at the 400 Hz flight-control update rate. Calculate
+        // immediately on entry to ANGLE, then hold the target rate between
+        // 12.5 ms outer-loop updates.
+        const bool angleUpdateDue = !_angleLoopInitialized ||
+            (uint32_t)(nowUs - _lastAngleUpdateUs) >= FC_ANGLE_UPDATE_INTERVAL_US;
+        if (angleUpdateDue)
+        {
+            const float angleDt = !_angleLoopInitialized
+                ? FC_ANGLE_UPDATE_INTERVAL_US * 1.0e-6f
+                : (nowUs - _lastAngleUpdateUs) * 1.0e-6f;
+            rollRateTarget = constrain(
+                _rollAnglePid.update(rollAngleTarget, _estimator.attitude().rollDeg, angleDt),
+                -(float)flightControlConfig.GetAngleRateLimitDps(0),
+                (float)flightControlConfig.GetAngleRateLimitDps(0));
+            pitchRateTarget = constrain(
+                _pitchAnglePid.update(pitchAngleTarget, _estimator.attitude().pitchDeg, angleDt),
+                -(float)flightControlConfig.GetAngleRateLimitDps(1),
+                (float)flightControlConfig.GetAngleRateLimitDps(1));
+            _lastAngleUpdateUs = nowUs;
+            _angleLoopInitialized = true;
+        }
+        else
+        {
+            rollRateTarget = _rollRateTarget;
+            pitchRateTarget = _pitchRateTarget;
+        }
     }
     _rollRateTarget = rollRateTarget;
     _pitchRateTarget = pitchRateTarget;

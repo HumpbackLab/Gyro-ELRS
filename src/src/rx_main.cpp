@@ -2186,6 +2186,7 @@ void loop()
     }
 
     devicesUpdate(now);
+    devicesUpdateMicros(micros());
 
     // read and process any data from serial ports, send any queued non-RC data
     handleSerialIO();

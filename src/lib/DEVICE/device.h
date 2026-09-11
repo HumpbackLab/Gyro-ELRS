@@ -32,6 +32,13 @@ typedef struct {
      * a new duration, this function should not return DURATION_IGNORE.
      */
     int (*timeout)();
+
+    /**
+     * @brief Optional high-rate timeout callback. It returns the number of
+     * microseconds until its next invocation. Existing devices continue to
+     * use timeout(), whose return value remains in milliseconds.
+     */
+    uint32_t (*timeoutUs)();
 } device_t;
 
 typedef struct {
@@ -71,6 +78,11 @@ void devicesStart();
  * @param now current time in millisecods
  */
 void devicesUpdate(unsigned long now);
+
+/**
+ * @brief Process optional microsecond-rate device callbacks.
+ */
+uint32_t devicesUpdateMicros(uint32_t nowUs);
 
 /**
  * @brief Notify the device framework that an event has occurred and on the next call to

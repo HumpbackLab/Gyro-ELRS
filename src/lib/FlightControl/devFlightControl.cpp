@@ -199,10 +199,7 @@ static void initialize()
 static int event()
 {
     runtime.refreshReadyState();
-    // Start or resume on the same 4 ms cadence used by timeout(). An immediate
-    // update here would create a short-dt outlier whenever connection state or
-    // model-match events fire.
-    return 4;
+    return DURATION_NEVER;
 }
 
 static bool rcInputReady()
@@ -246,6 +243,11 @@ static bool rcInputReady()
 
 static int timeout()
 {
+    return DURATION_NEVER;
+}
+
+static uint32_t timeoutUs()
+{
     // Always inspect the configured mode channel while the receiver is connected.
     if (connectionState == connected && connectionHasModelMatch && teamraceHasModelMatch)
     {
@@ -257,10 +259,10 @@ static int timeout()
         if (connectionState == wifiUpdate)
         {
             runtime.updateAttitudeOnly(micros());
-            return 4;
+            return 1250;
         }
         runtime.reset();
-        return FC_READY_RETRY_INTERVAL_MS;
+        return FC_READY_RETRY_INTERVAL_MS * 1000U;
     }
 
     const uint32_t nowUs = micros();
@@ -276,7 +278,7 @@ static int timeout()
     }
 
     reportAttitude(millis());
-    return 4; // 250Hz, matched to FC_UPDATE_INTERVAL_US
+    return 1250; // 800Hz, matched to FC_UPDATE_INTERVAL_US
 }
 
 device_t FlightControl_device = {
@@ -284,6 +286,7 @@ device_t FlightControl_device = {
     .start = nullptr,
     .event = event,
     .timeout = timeout,
+    .timeoutUs = timeoutUs,
 };
 
 #endif

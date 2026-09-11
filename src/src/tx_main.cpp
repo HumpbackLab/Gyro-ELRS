@@ -1513,6 +1513,7 @@ void loop()
 
   // Update UI devices
   devicesUpdate(now);
+  devicesUpdateMicros(micros());
 
   // Not a device because it must be run on the loop core
   checkBackpackUpdate();

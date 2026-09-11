@@ -103,42 +103,42 @@ static int start()
     return DURATION_NEVER;
 }
 
-static int timeout()
+static uint32_t timeoutUs()
 {
     switch (GyroReadState)
     {
         default:
         case grsNoGyro:
-            return DURATION_NEVER;
+            return UINT32_MAX;
 
         case grsUninitialized:
-            return Gyro_Init();
+            {
+                const int delayMs = Gyro_Init();
+                return delayMs == DURATION_NEVER
+                    ? UINT32_MAX
+                    : static_cast<uint32_t>(delayMs) * 1000U;
+            }
 
         case grsReadGyro:
-            {
-                const uint8_t gyroDuration = gyro->getGyroDuration();
-                GyroReadState = grsWaitingGyro;
-                if (gyroDuration != 0)
-                {
-                    gyro->startGyro();
-                    return gyroDuration;
-                }
-            }
-            // fallthrough
-
-        case grsWaitingGyro:
             {
                 GyroVector3 gyroDps;
                 GyroVector3 accelMps2;
                 bool accelValid = false;
                 if (!gyro->getMotion(gyroDps, accelMps2, accelValid))
                 {
-                    return DURATION_IMMEDIATELY;
+                    // Keep the same sensor cadence after a transient I2C
+                    // failure; do not busy-loop or desynchronize the FC loop.
+                    return 1250U;
                 }
                 Gyro_Publish(gyroDps, accelMps2, accelValid);
-                GyroReadState = grsReadGyro;
-                return DURATION_IMMEDIATELY;
+                return 1250U;
             }
+
+        case grsWaitingGyro:
+            // Kept for enum compatibility with older code paths. The SC7U22
+            // now performs one direct read on every inner-loop callback.
+            GyroReadState = grsReadGyro;
+            return 1250U;
     }
 }
 
@@ -146,7 +146,8 @@ device_t Gyro_device = {
     .initialize = nullptr,
     .start = start,
     .event = nullptr,
-    .timeout = timeout,
+    .timeout = nullptr,
+    .timeoutUs = timeoutUs,
 };
 
 #endif
