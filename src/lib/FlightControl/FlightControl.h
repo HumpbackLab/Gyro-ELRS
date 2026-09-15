@@ -99,6 +99,7 @@ private:
     void completeArmGyroBiasSampling();
     bool readTransformedImu(FlightControlImuSample &sample, float dt, bool collectArmBiasSample);
     void filterGyro(FlightControlImuSample &sample, float dt);
+    void filterAngleRateTargets(float &rollRateTarget, float &pitchRateTarget, float dt);
 
     FlightControlSensorBackend _sensors;
     FlightControlEstimator _estimator;
@@ -108,6 +109,8 @@ private:
     FlightControlPid _rollAnglePid;
     FlightControlPid _pitchAnglePid;
     FlightControlPid _yawAnglePid;
+    FlightControlVector3 _rateFeedforwardGain = {};
+    FlightControlVector3 _filteredAngleRateTarget = {};
     FlightControlMixer _mixer;
     FlightControlOrientation _orientation;
     FlightControlMixerOutput _mixerOutput = {};
@@ -124,9 +127,11 @@ private:
     bool _mixerReady = false;
     bool _pidReady = false;
     bool _gyroFilterInitialized = false;
+    bool _angleRateFilterInitialized = false;
     bool _armGyroBiasSampling = false;
     uint8_t _armGyroBiasSampleCount = 0;
     uint8_t _gyroFilterHz = 0;
+    uint8_t _angleRateFilterHz = 0;
     FlightControlMode _mode = FLIGHT_CONTROL_MODE_MANUAL;
     float _rollAngleTarget = 0.0f;
     float _pitchAngleTarget = 0.0f;

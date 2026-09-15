@@ -351,6 +351,9 @@ static void applyFlightControlSensitivity(uint8_t level)
   flightControlConfig.SetRatePid(offset + 2, luaFlightControlServoDebounce.value
     ? 0
     : sign * (LUA_FC_RATE_PID_BASE[2] * gain / 1000U));
+  const int32_t configuredFf = flightControlConfig.GetRateFeedforward()[axis];
+  const int16_t ffMagnitude = (int16_t)min(abs(configuredFf), 32767L);
+  flightControlConfig.SetRateFeedforward(axis, sign * ffMagnitude);
   if (flightControlConfig.Commit())
   {
     updateFlightControlSensitivity();

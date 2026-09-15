@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 constexpr uint8_t FC_PID_TERM_COUNT = 12;
+constexpr uint8_t FC_RATE_FF_TERM_COUNT = 3;
 constexpr uint8_t FC_ANGLE_RATE_LIMIT_AXIS_COUNT = 2;
 constexpr uint16_t FC_ANGLE_RATE_LIMIT_MIN_DPS = 1;
 constexpr uint16_t FC_ANGLE_RATE_LIMIT_MAX_DPS = 1000;
@@ -35,6 +36,9 @@ constexpr uint8_t FC_DTERM_LPF_DEFAULT_HZ = 0;
 constexpr uint8_t FC_GYRO_LPF_MIN_HZ = 5;
 constexpr uint8_t FC_GYRO_LPF_MAX_HZ = 100;
 constexpr uint8_t FC_GYRO_LPF_DEFAULT_HZ = 0;
+constexpr uint8_t FC_ANGLE_RATE_LPF_MIN_HZ = 1;
+constexpr uint8_t FC_ANGLE_RATE_LPF_MAX_HZ = 100;
+constexpr uint8_t FC_ANGLE_RATE_LPF_DEFAULT_HZ = 5;
 
 enum FlightControlMode : uint8_t
 {
@@ -77,6 +81,7 @@ public:
     void SetDefaults();
 
     const int16_t *GetRatePid() const { return m_ratePid; }
+    const int16_t *GetRateFeedforward() const { return m_rateFeedforward; }
     const int16_t *GetAnglePid() const { return m_anglePid; }
     uint16_t GetAngleRateLimitDps(uint8_t axis) const
     {
@@ -86,6 +91,7 @@ public:
     }
     uint8_t GetDtermLpfHz() const { return m_dtermLpfHz; }
     uint8_t GetGyroLpfHz() const { return m_gyroLpfHz; }
+    uint8_t GetAngleRateLpfHz() const { return m_angleRateLpfHz; }
     FlightControlGyroBiasMode GetGyroBiasMode() const { return m_gyroBiasMode; }
     bool GetModeEnabled(FlightControlMode mode) const { return mode != FLIGHT_CONTROL_MODE_MANUAL && m_modeEnabled[mode]; }
     uint8_t GetModeChannel(FlightControlMode mode) const { return m_modeChannels[mode]; }
@@ -112,10 +118,12 @@ public:
     bool IsModified() const { return m_modified; }
 
     void SetRatePid(uint8_t index, int16_t value);
+    void SetRateFeedforward(uint8_t axis, int16_t value);
     void SetAnglePid(uint8_t index, int16_t value);
     void SetAngleRateLimitDps(uint8_t axis, int valueDps);
     void SetDtermLpfHz(int frequencyHz);
     void SetGyroLpfHz(int frequencyHz);
+    void SetAngleRateLpfHz(int frequencyHz);
     void SetGyroBiasMode(FlightControlGyroBiasMode mode);
     void SetModeEnabled(FlightControlMode mode, bool enabled);
     void SetModeChannel(FlightControlMode mode, uint8_t channel);
@@ -138,6 +146,7 @@ public:
 
 private:
     int16_t m_ratePid[FC_PID_TERM_COUNT] = {};
+    int16_t m_rateFeedforward[FC_RATE_FF_TERM_COUNT] = {};
     int16_t m_anglePid[FC_PID_TERM_COUNT] = {};
     uint16_t m_angleRateLimitDps[FC_ANGLE_RATE_LIMIT_AXIS_COUNT] = {
         FC_ANGLE_RATE_LIMIT_DEFAULT_DPS,
@@ -145,6 +154,7 @@ private:
     };
     uint8_t m_dtermLpfHz = FC_DTERM_LPF_DEFAULT_HZ;
     uint8_t m_gyroLpfHz = FC_GYRO_LPF_DEFAULT_HZ;
+    uint8_t m_angleRateLpfHz = FC_ANGLE_RATE_LPF_DEFAULT_HZ;
     FlightControlGyroBiasMode m_gyroBiasMode = FLIGHT_CONTROL_GYRO_BIAS_CONFIGURED;
     float m_mixer[FC_MIXER_VALUE_COUNT] = {};
     bool m_mixerOutputServo[FC_MIXER_MAX_MOTORS] = {};

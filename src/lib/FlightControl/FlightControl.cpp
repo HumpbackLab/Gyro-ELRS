@@ -403,6 +403,9 @@ void FlightControlRuntime::resetPidState()
     _rollAnglePid.reset();
     _pitchAnglePid.reset();
     _yawAnglePid.reset();
+    _filteredAngleRateTarget = {};
+    _angleRateFilterInitialized = false;
+    _angleRateFilterHz = 0;
 }
 
 void FlightControlRuntime::resetControlState()
@@ -595,6 +598,34 @@ void FlightControlRuntime::filterGyro(FlightControlImuSample &sample, float dt)
     sample.gyroDps = _filteredGyroDps;
 }
 
+void FlightControlRuntime::filterAngleRateTargets(float &rollRateTarget, float &pitchRateTarget, float dt)
+{
+    const uint8_t cutoffHz = flightControlConfig.GetAngleRateLpfHz();
+    if (cutoffHz == 0 || dt <= 0.0f)
+    {
+        _filteredAngleRateTarget = {};
+        _angleRateFilterInitialized = false;
+        _angleRateFilterHz = cutoffHz;
+        return;
+    }
+
+    if (!_angleRateFilterInitialized || _angleRateFilterHz != cutoffHz)
+    {
+        // Start from zero when ANGLE mode is entered so a step in the outer-loop
+        // command is smoothed instead of passing through on the first sample.
+        _filteredAngleRateTarget = {};
+        _angleRateFilterInitialized = true;
+        _angleRateFilterHz = cutoffHz;
+    }
+
+    const float rc = 1.0f / (FC_TWO_PI * cutoffHz);
+    const float alpha = dt / (rc + dt);
+    _filteredAngleRateTarget.x += alpha * (rollRateTarget - _filteredAngleRateTarget.x);
+    _filteredAngleRateTarget.y += alpha * (pitchRateTarget - _filteredAngleRateTarget.y);
+    rollRateTarget = _filteredAngleRateTarget.x;
+    pitchRateTarget = _filteredAngleRateTarget.y;
+}
+
 bool FlightControlRuntime::refreshReadyState()
 {
     if (!_sensorsReady)
@@ -610,6 +641,12 @@ bool FlightControlRuntime::loadPidParameters()
 {
     const bool rateReady = loadPidBank(_rollRatePid, _pitchRatePid, _yawRatePid, flightControlConfig.GetRatePid(), FC_PID_TERM_COUNT);
     const bool angleReady = loadPidBank(_rollAnglePid, _pitchAnglePid, _yawAnglePid, flightControlConfig.GetAnglePid(), FC_PID_TERM_COUNT);
+    const int16_t *rateFeedforward = flightControlConfig.GetRateFeedforward();
+    _rateFeedforwardGain = {
+        rateFeedforward[0] * FC_PID_CONFIG_SCALE,
+        rateFeedforward[1] * FC_PID_CONFIG_SCALE,
+        rateFeedforward[2] * FC_PID_CONFIG_SCALE,
+    };
     return rateReady && angleReady;
 }
 
@@ -783,6 +820,7 @@ void FlightControlRuntime::update(uint32_t nowUs)
             _pitchAnglePid.update(pitchAngleTarget, _estimator.attitude().pitchDeg, dt),
             -(float)flightControlConfig.GetAngleRateLimitDps(1),
             (float)flightControlConfig.GetAngleRateLimitDps(1));
+        filterAngleRateTargets(rollRateTarget, pitchRateTarget, dt);
     }
     _rollRateTarget = rollRateTarget;
     _pitchRateTarget = pitchRateTarget;
@@ -790,9 +828,11 @@ void FlightControlRuntime::update(uint32_t nowUs)
     const float gyroRoll = sample.gyroValid ? sample.gyroDps.x : 0.0f;
     const float gyroPitch = sample.gyroValid ? sample.gyroDps.y : 0.0f;
     const float gyroYaw = sample.gyroValid ? sample.gyroDps.z : 0.0f;
-    const float rollCorrection = _rollRatePid.update(rollRateTarget, gyroRoll, dt);
-    const float pitchCorrection = _pitchRatePid.update(pitchRateTarget, gyroPitch, dt);
-    const float yawCorrection = _yawRatePid.update(yawRateTarget, gyroYaw, dt);
+    // Keep feedforward outside the generic PID controller: only the angular-rate
+    // loop receives the INAV fixed-wing PIFF rate-target contribution.
+    const float rollCorrection = _rollRatePid.update(rollRateTarget, gyroRoll, dt) + _rateFeedforwardGain.x * rollRateTarget;
+    const float pitchCorrection = _pitchRatePid.update(pitchRateTarget, gyroPitch, dt) + _rateFeedforwardGain.y * pitchRateTarget;
+    const float yawCorrection = _yawRatePid.update(yawRateTarget, gyroYaw, dt) + _rateFeedforwardGain.z * yawRateTarget;
 
     _mixerOutput = _mixer.mix(throttle, rollCorrection, pitchCorrection, yawCorrection);
 }
