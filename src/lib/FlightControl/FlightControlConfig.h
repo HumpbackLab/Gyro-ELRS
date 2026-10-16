@@ -5,6 +5,7 @@
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
 
 #include <stdint.h>
+#include "DriftAssist.h"
 
 constexpr uint8_t FC_PID_TERM_COUNT = 12;
 constexpr uint8_t FC_RATE_FF_TERM_COUNT = 3;
@@ -79,6 +80,11 @@ public:
     void Load();
     bool Commit();
     void SetDefaults();
+    const DriftAssistSettings &GetDriftAssist() const { return m_drift; }
+    void SetDriftAssist(const DriftAssistSettings &settings);
+    uint32_t GetRevision() const { return m_revision; }
+    bool DriftMixerCompatible() const;
+    bool DriftChannelCompatible() const;
 
     const int16_t *GetRatePid() const { return m_ratePid; }
     const int16_t *GetRateFeedforward() const { return m_rateFeedforward; }
@@ -175,6 +181,8 @@ private:
     bool m_armMode = false;
     uint8_t m_armChannel = FC_ARM_CHANNEL_DEFAULT;
     FlightControlChannelRange m_armRange = {};
+    DriftAssistSettings m_drift;
+    uint32_t m_revision = 0;
     bool m_modified = false;
 };
 

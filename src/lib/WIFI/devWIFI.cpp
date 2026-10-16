@@ -56,6 +56,8 @@
 #include "devServoOutput.h"
 #if defined(HAS_BASIC_FLIGHT_CONTROL)
 #include "FlightControlConfig.h"
+#include "DriftAssistJson.h"
+#include "devFlightControl.h"
 #endif
 
 #if !defined(EXTERNAL_CONFIGURATOR_ONLY)
@@ -718,6 +720,7 @@ static void GetConfiguration(AsyncWebServerRequest *request)
     json["config"]["fc_arm_enabled"] = flightControlConfig.GetArmMode();
     json["config"]["fc_arm_channel"] = flightControlConfig.GetArmChannel() + 1;
     JsonObject configJson = json["config"];
+    driftSettingsToJson(configJson["fc_drift"].to<JsonObject>(), flightControlConfig.GetDriftAssist());
     JsonObject modeConditions = configJson["fc_mode_conditions"].to<JsonObject>();
     const char *modeKeys[] = {nullptr, "rate", "angle"};
     for (uint8_t mode = FLIGHT_CONTROL_MODE_RATE; mode < FLIGHT_CONTROL_MODE_COUNT; ++mode)
@@ -816,6 +819,20 @@ static void GetRuntimeStatus(AsyncWebServerRequest *request)
 {
   AsyncJsonResponse *response = new AsyncJsonResponse();
   JsonObject json = response->getRoot();
+#if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
+  FlightControlDebugSnapshot driftSnapshot = {};
+  flightControlGetDebugSnapshot(driftSnapshot);
+  JsonObject drift = json["drift"].to<JsonObject>();
+  drift["enabled"] = flightControlConfig.GetDriftAssist().enabled;
+  drift["armed"] = driftSnapshot.armed;
+  drift["requested"] = driftSnapshot.driftRequested;
+  drift["reason"] = driftSnapshot.driftReason;
+  drift["target_dps"] = driftSnapshot.yawRateTarget;
+  drift["measured_dps"] = driftSnapshot.filteredGyroDps.z;
+  drift["input_percent"] = driftSnapshot.driftThrottleInput * 0.1f;
+  drift["output_percent"] = driftSnapshot.driftThrottleOutput * 0.1f;
+  drift["reduction_percent"] = driftSnapshot.driftReduction * 100.0f;
+#endif
 #if defined(HAS_GYRO)
   JsonObject imu = json["imu"].to<JsonObject>();
   imu["gyro-ready"] = GyroIsInitialized();
@@ -982,6 +999,63 @@ static void JsonUidToConfig(JsonVariant &json)
 }
 static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &json)
 {
+  // Reject invalid drift changes before any configuration setters run.
+  #if defined(HAS_BASIC_FLIGHT_CONTROL)
+  DriftAssistSettings nextDrift = flightControlConfig.GetDriftAssist();
+  if (json.containsKey("fc_drift") && !driftSettingsFromJson(json["fc_drift"], nextDrift)) {
+    request->send(400, "text/plain", "Invalid drift assistance parameters"); return;
+  }
+  if (json.containsKey("fc_drift")) {
+    FlightControlDebugSnapshot snapshot = {};
+    const bool snapshotValid = flightControlGetDebugSnapshot(snapshot);
+    // Compare values rather than JSON key order.
+    const auto &old = flightControlConfig.GetDriftAssist();
+    const bool changed = old.enabled != nextDrift.enabled || old.channel != nextDrift.channel ||
+      old.startUs != nextDrift.startUs || old.endUs != nextDrift.endUs ||
+      old.thresholdDps != nextDrift.thresholdDps || old.rampDps != nextDrift.rampDps ||
+      old.maxReductionPercent != nextDrift.maxReductionPercent || old.attackMs != nextDrift.attackMs || old.recoveryMs != nextDrift.recoveryMs;
+    const uint32_t throttleRaw = ChannelData[2];
+    const bool stateValid = snapshotValid && (uint32_t)(millis() - snapshot.updateTimestampMs) <= 100U &&
+      connectionHasModelMatch && teamraceHasModelMatch &&
+      throttleRaw >= CRSF_CHANNEL_VALUE_MIN && throttleRaw <= CRSF_CHANNEL_VALUE_MAX;
+    const char *changeError = driftSettingsChangeError(changed, connectionState == connected,
+      stateValid, snapshot.armed, CRSF_to_US(throttleRaw));
+    if (changeError) {
+      request->send(409, "text/plain", changeError); return;
+    }
+  }
+  if (nextDrift.enabled) {
+    float mixer[FC_MIXER_VALUE_COUNT] = {};
+    bool servos[FC_MIXER_MAX_MOTORS] = {};
+    unsigned count = flightControlConfig.GetMixerCount();
+    for (unsigned i = 0; i < count; ++i) mixer[i] = flightControlConfig.GetMixer()[i];
+    for (unsigned i = 0; i < FC_MIXER_MAX_MOTORS; ++i) servos[i] = flightControlConfig.GetMixerOutputServo(i);
+    if (json.containsKey("fc_mixer")) {
+      JsonArray arr = json["fc_mixer"].as<JsonArray>(); count = arr.size();
+      if (count > FC_MIXER_VALUE_COUNT || count % 4) { request->send(400, "text/plain", "Invalid car mixer"); return; }
+      for (unsigned i = 0; i < count; ++i) {
+        if (!arr[i].is<float>()) { request->send(400, "text/plain", "Invalid car mixer"); return; }
+        mixer[i] = arr[i];
+      }
+    }
+    if (json.containsKey("fc_mixer_servos")) {
+      JsonArray arr = json["fc_mixer_servos"].as<JsonArray>();
+      for (unsigned i = 0; i < FC_MIXER_MAX_MOTORS; ++i) servos[i] = i < arr.size() && arr[i].as<bool>();
+    }
+    const bool armEnabled = json["fc_arm_enabled"] | flightControlConfig.GetArmMode();
+    const int armChannel = json["fc_arm_channel"] | (flightControlConfig.GetArmChannel() + 1);
+    bool wifiEnabled = flightControlConfig.GetWifiCoexistEnabled();
+    int wifiChannel = flightControlConfig.GetWifiCoexistChannel() + 1;
+    if (json.containsKey("fc_wifi_conditions")) {
+      JsonArray range = json["fc_wifi_conditions"]["coexist"].as<JsonArray>();
+      wifiEnabled = range.size() >= 3; if (wifiEnabled) wifiChannel = range[0];
+    }
+    if (!driftMixerCompatible(mixer, servos, count) ||
+      (armEnabled && armChannel == nextDrift.channel) || (wifiEnabled && wifiChannel == nextDrift.channel)) {
+      request->send(400, "text/plain", "Drift assistance requires a car mixer and an independent switch channel"); return;
+    }
+  }
+  #endif
   uint8_t protocol = json["serial-protocol"] | 0;
   config.SetSerialProtocol((eSerialProtocol)protocol);
 
@@ -1117,7 +1191,10 @@ static void UpdateConfiguration(AsyncWebServerRequest *request, JsonVariant &jso
         limits[0].as<uint16_t>(), limits[1].as<uint16_t>(), limits[2].as<uint16_t>());
     }
   }
-  flightControlConfig.Commit();
+  if (json.containsKey("fc_drift")) flightControlConfig.SetDriftAssist(nextDrift);
+  if (!flightControlConfig.Commit() && json.containsKey("fc_drift")) {
+    request->send(500, "text/plain", "Failed to persist drift assistance configuration"); return;
+  }
   #endif
 
   config.Commit();

@@ -2,6 +2,7 @@
 
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
 
+#include "DriftAssistJson.h"
 #include <ArduinoJson.h>
 #include <FS.h>
 #if defined(PLATFORM_ESP32)
@@ -17,6 +18,7 @@ FlightControlConfig flightControlConfig;
 
 void FlightControlConfig::SetDefaults()
 {
+    m_drift = DriftAssistSettings{};
     memset(m_ratePid, 0, sizeof(m_ratePid));
     memset(m_rateFeedforward, 0, sizeof(m_rateFeedforward));
     memset(m_anglePid, 0, sizeof(m_anglePid));
@@ -85,6 +87,8 @@ void FlightControlConfig::Load()
         return;
     }
 
+    // Missing or malformed drift settings never enable assistance.
+    driftSettingsFromJson(doc["drift"], m_drift);
     JsonArray ratePid = doc["rate_pid"].as<JsonArray>();
     for (uint8_t i = 0; i < min(ratePid.size(), (size_t)FC_PID_TERM_COUNT); ++i)
     {
@@ -261,6 +265,7 @@ bool FlightControlConfig::Commit()
     }
 
     JsonDocument doc;
+    driftSettingsToJson(doc["drift"].to<JsonObject>(), m_drift);
     copyArray(m_ratePid, doc["rate_pid"].to<JsonArray>());
     copyArray(m_rateFeedforward, doc["rate_ff"].to<JsonArray>());
     copyArray(m_anglePid, doc["angle_pid"].to<JsonArray>());
@@ -332,7 +337,33 @@ bool FlightControlConfig::Commit()
         return false;
     }
     m_modified = false;
+    ++m_revision;
     return true;
+}
+
+void FlightControlConfig::SetDriftAssist(const DriftAssistSettings &settings)
+{
+    if (!driftSettingsValid(settings)) return;
+    const auto &a = m_drift;
+    if (a.enabled == settings.enabled && a.channel == settings.channel &&
+        a.startUs == settings.startUs && a.endUs == settings.endUs &&
+        a.thresholdDps == settings.thresholdDps && a.rampDps == settings.rampDps &&
+        a.maxReductionPercent == settings.maxReductionPercent &&
+        a.attackMs == settings.attackMs && a.recoveryMs == settings.recoveryMs) return;
+    m_drift = settings;
+    m_modified = true;
+}
+
+bool FlightControlConfig::DriftMixerCompatible() const
+{
+    return driftMixerCompatible(m_mixer, m_mixerOutputServo, m_mixerCount);
+}
+
+bool FlightControlConfig::DriftChannelCompatible() const
+{
+    const unsigned channel = m_drift.channel - 1;
+    return !(m_armMode && channel == m_armChannel) &&
+        !(m_wifiCoexistEnabled && channel == m_wifiCoexistChannel);
 }
 
 void FlightControlConfig::SetRatePid(uint8_t index, int16_t value)
