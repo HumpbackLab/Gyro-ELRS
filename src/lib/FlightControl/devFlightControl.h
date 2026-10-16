@@ -58,6 +58,11 @@ struct FlightControlDebugSnapshot {
     float pitchRateTarget;
     float yawRateTarget;
     bool armed;
+    const char *driftReason;
+    bool driftRequested;
+    float driftThrottleInput;
+    float driftThrottleOutput;
+    float driftReduction;
 };
 
 const FlightControlAttitude &flightControlGetAttitude();

@@ -397,6 +397,10 @@ void FlightControlRuntime::resetAttitudeState()
 
 void FlightControlRuntime::resetPidState()
 {
+    _drift.reset();
+    _driftRequested = false;
+    _driftThrottleInput = _driftThrottleOutput = 0;
+    _driftReason = "inactive";
     _rollRatePid.reset();
     _pitchRatePid.reset();
     _yawRatePid.reset();
@@ -667,6 +671,12 @@ bool FlightControlRuntime::loadPidBank(FlightControlPid &rollPid, FlightControlP
 
 void FlightControlRuntime::updateAttitudeOnly(uint32_t nowUs)
 {
+    // Wi-Fi-only operation and missing RC input must not retain assistance
+    // history for the next connected session.
+    _drift.reset();
+    _driftRequested = false;
+    _driftThrottleInput = _driftThrottleOutput = 0;
+    _driftReason = "inactive";
     if (!_sensorsReady)
     {
         _sensorsReady = _sensors.begin();
@@ -741,6 +751,10 @@ void FlightControlRuntime::update(uint32_t nowUs)
         return;
     }
 
+    if (_driftConfigRevision != flightControlConfig.GetRevision()) {
+        _drift.reset();
+        _driftConfigRevision = flightControlConfig.GetRevision();
+    }
     updateArmState();
 
     // Timing is owned by FlightControl_device. A duplicate gate here caused
@@ -779,6 +793,7 @@ void FlightControlRuntime::update(uint32_t nowUs)
     _estimator.update(sample, dt);
     if (!_armed)
     {
+        _driftReason = "disarmed";
         return;
     }
     const FlightControlMode nextMode = readModeSwitch();
@@ -797,6 +812,9 @@ void FlightControlRuntime::update(uint32_t nowUs)
     _rollAngleTarget = rollAngleTarget;
     _pitchAngleTarget = pitchAngleTarget;
     _yawRateTarget = yawRateTarget;
+    _driftThrottleInput = _driftThrottleOutput = throttle;
+    _driftRequested = false;
+    _driftReason = flightControlConfig.GetDriftAssist().enabled ? "mode" : "disabled";
 
     if (_mode == FLIGHT_CONTROL_MODE_MANUAL)
     {
@@ -834,6 +852,27 @@ void FlightControlRuntime::update(uint32_t nowUs)
     const float pitchCorrection = _pitchRatePid.update(pitchRateTarget, gyroPitch, dt) + _rateFeedforwardGain.y * pitchRateTarget;
     const float yawCorrection = _yawRatePid.update(yawRateTarget, gyroYaw, dt) + _rateFeedforwardGain.z * yawRateTarget;
 
+    const auto &drift = flightControlConfig.GetDriftAssist();
+    if (drift.enabled && _mode == FLIGHT_CONTROL_MODE_RATE) {
+        const uint16_t switchRaw = ChannelData[drift.channel - 1];
+        const bool validSwitch = switchRaw >= CRSF_CHANNEL_VALUE_MIN && switchRaw <= CRSF_CHANNEL_VALUE_MAX;
+        const uint16_t switchUs = validSwitch ? CRSF_to_US(switchRaw) : 0;
+        const bool validMixer = flightControlConfig.DriftMixerCompatible();
+        const bool validChannel = flightControlConfig.DriftChannelCompatible();
+        const bool validSensor = sample.gyroValid && isfinite(gyroYaw) && _lastSampleAgeMs <= 20;
+        if (!validMixer) _driftReason = "mixer";
+        else if (!validChannel) _driftReason = "channel_conflict";
+        else if (!validSwitch) _driftReason = "switch_invalid";
+        else if (!validSensor) _driftReason = "sensor";
+        else {
+            _driftRequested = switchUs >= drift.startUs && switchUs < drift.endUs;
+            throttle = _drift.update(throttle, yawRateTarget, gyroYaw, dt, nowUs, _driftRequested, drift);
+            _driftThrottleOutput = throttle;
+            _driftReason = _driftRequested ? (throttle == 0 ? "idle" : "active")
+                : (_drift.reduction() > 0 ? "releasing" : "switch_off");
+        }
+        if (!validSwitch || !validMixer || !validChannel || !validSensor) _drift.reset();
+    } else _drift.reset();
     _mixerOutput = _mixer.mix(throttle, rollCorrection, pitchCorrection, yawCorrection);
 }
 
@@ -862,6 +901,11 @@ bool FlightControlRuntime::getDebugSnapshot(FlightControlDebugSnapshot &snapshot
     snapshot.pitchRateTarget = _pitchRateTarget;
     snapshot.yawRateTarget = _yawRateTarget;
     snapshot.armed = _armed;
+    snapshot.driftReason = _driftReason;
+    snapshot.driftRequested = _driftRequested;
+    snapshot.driftThrottleInput = _driftThrottleInput;
+    snapshot.driftThrottleOutput = _driftThrottleOutput;
+    snapshot.driftReduction = _drift.reduction();
     return _lastDebugUpdateMs != 0;
 }
 

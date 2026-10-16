@@ -138,6 +138,11 @@ private:
     float _rollRateTarget = 0.0f;
     float _pitchRateTarget = 0.0f;
     float _yawRateTarget = 0.0f;
+    DriftAssist _drift;
+    uint32_t _driftConfigRevision = 0;
+    const char *_driftReason = "disabled";
+    float _driftThrottleInput = 0, _driftThrottleOutput = 0;
+    bool _driftRequested = false;
     bool _armed = false;
 };
 
