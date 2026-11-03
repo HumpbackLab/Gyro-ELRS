@@ -123,6 +123,7 @@ static const struct {
     {HARDWARE_thermal_lm75a, "thermal_lm75a", BOOL},
     {HARDWARE_pwm_outputs, "pwm_outputs", ARRAY},
     {HARDWARE_pwm_outputs_count, "pwm_outputs", COUNT},
+    {HARDWARE_ESC, "ESC", INT},
     {HARDWARE_vbat, "vbat", INT},
     {HARDWARE_vbat_offset, "vbat_offset", INT},
     {HARDWARE_vbat_scale, "vbat_scale", INT},

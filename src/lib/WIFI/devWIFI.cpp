@@ -36,6 +36,7 @@
 #include <DNSServer.h>
 
 #include <set>
+#include <atomic>
 #include <StreamString.h>
 
 #include "ArduinoJson.h"
@@ -54,6 +55,11 @@
 #include "devGyro.h"
 #include "devAnalogVbat.h"
 #include "devServoOutput.h"
+#if defined(PLATFORM_ESP32_C3) && defined(TARGET_RX)
+#include "am32_bootloader.h"
+#include <driver/gpio.h>
+#include <driver/uart.h>
+#endif
 #if defined(HAS_BASIC_FLIGHT_CONTROL)
 #include "FlightControlConfig.h"
 #include "DriftAssistJson.h"
@@ -86,6 +92,120 @@ static char station_ssid[33];
 static char station_password[65];
 
 static bool wifiStarted = false;
+#if defined(PLATFORM_ESP32_C3) && defined(TARGET_RX)
+static SingleWireSerial am32Wire;
+static Am32Bootloader am32(am32Wire);
+static bool am32Reserved = false;
+static int am32ActivePin = -1;
+static bool am32Writable = false;
+static std::atomic<bool> am32Busy{false};
+
+static bool am32Available()
+{
+  const int pin = hardware_pin(HARDWARE_ESC);
+  if (pin < 0 || pin > 21) return false;
+  for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
+    if (GPIO_PIN_PWM_OUTPUTS[ch] == pin) return true;
+  return false;
+}
+
+static String am32Hex(const uint8_t *bytes, size_t count)
+{
+  static const char digits[] = "0123456789ABCDEF";
+  String result;
+  result.reserve(count * 2);
+  for (size_t i = 0; i < count; ++i) {
+    result += digits[bytes[i] >> 4];
+    result += digits[bytes[i] & 15];
+  }
+  return result;
+}
+
+static void am32Reply(AsyncWebServerRequest *request, bool ok, const String &message,
+                      const uint8_t *data = nullptr, const uint8_t *name = nullptr)
+{
+  AsyncJsonResponse *response = new AsyncJsonResponse();
+  JsonObject json = response->getRoot();
+  json["ok"] = ok;
+  json["message"] = message;
+  json["connected"] = am32.connected;
+  json["writable"] = am32Writable;
+  json["pin"] = am32Reserved ? am32ActivePin : hardware_pin(HARDWARE_ESC);
+  if (data) json["data"] = am32Hex(data, 192);
+  if (name) json["name"] = am32Hex(name, 32);
+  if (am32.connected) {
+    json["device"] = am32Hex(am32.deviceInfo, 9);
+    json["protocol"] = am32.protocolVersion;
+  }
+  response->setCode(ok ? 200 : 409);
+  response->setLength();
+  request->send(response);
+}
+
+static void am32Action(AsyncWebServerRequest *request, JsonVariant &json)
+{
+  if (!am32Available()) { request->send(404); return; }
+  if (am32Busy.exchange(true)) { request->send(423, "text/plain", "AM32 is busy"); return; }
+  const String action = json["action"] | "";
+  if (action == "connect") {
+    am32Writable = false;
+    if (!am32Reserved) {
+      const int pin = hardware_pin(HARDWARE_ESC);
+      if (config.GetSerial1Protocol() != PROTOCOL_SERIAL1_OFF || !servoReserveOutputPin(pin)) {
+        am32Reply(request, false, "ESC output pin or UART1 is unavailable");
+        am32Busy = false;
+        return;
+      }
+      am32ActivePin = pin;
+      am32Reserved = true;
+      am32Wire.begin(pin, 19200);
+      delay(3000);
+    }
+    if (!am32.connect()) {
+      am32Reply(request, false, am32.lastError);
+    } else {
+      am32Reply(request, true, "AM32 connected");
+    }
+  } else if (action == "read" && am32.connected) {
+    uint8_t name[32], data[192];
+    bool ok = am32.readSettings(name, data);
+    am32Writable = ok;
+    am32Reply(request, ok, ok ? "192 bytes read" : am32.lastError, ok ? data : nullptr, ok ? name : nullptr);
+  } else if (action == "save" && am32.connected && am32Writable) {
+    const String input = json["data"] | "";
+    uint8_t data[192], check[192], name[32];
+    bool valid = input.length() == 384;
+    for (int i = 0; valid && i < 192; ++i) {
+      char pair[3] = {input[2*i], input[2*i+1], 0};
+      if (!isxdigit(pair[0]) || !isxdigit(pair[1])) valid = false;
+      else data[i] = (uint8_t)strtoul(pair, nullptr, 16);
+    }
+    if (!valid) am32Reply(request, false, "Expected exactly 192 bytes of hexadecimal settings");
+    else {
+      bool ok = am32.writeEeprom(data, sizeof(data)) && am32.readSettings(name, check);
+      if (ok) ok = memcmp(data, check, sizeof(data)) == 0;
+      if (!ok) am32Writable = false;
+      am32Reply(request, ok, ok ? "Saved and verified 192 bytes" : "Write or read-back verification failed: " + am32.lastError,
+                ok ? check : nullptr, ok ? name : nullptr);
+    }
+  } else if (action == "exit" && am32Reserved) {
+    am32Writable = false;
+    am32.runApplication();
+    uart_driver_delete(UART_NUM_1);
+    servoRestoreOutputPin(am32ActivePin);
+    am32Reserved = false;
+    am32ActivePin = -1;
+    am32Reply(request, true, "Configuration ended; ESC output waits for a new link and zero throttle");
+  } else am32Reply(request, false, "Operation unavailable in current state");
+  am32Busy = false;
+}
+
+static void am32Status(AsyncWebServerRequest *request)
+{
+  if (!am32Available()) { request->send(404); return; }
+  am32Reply(request, true, am32Reserved ? "ESC output reserved for AM32" : "Ready");
+}
+#endif
 static bool flightControlWifiCoexist = false;
 bool webserverPreventAutoStart = false;
 
@@ -1924,6 +2044,12 @@ static void startServices()
   server.on("/connect", WebUpdateConnect);
   server.on("/config", HTTP_GET, GetConfiguration);
   server.on("/status.json", HTTP_GET, GetRuntimeStatus);
+#if defined(PLATFORM_ESP32_C3) && defined(TARGET_RX)
+  server.on("/am32/status", HTTP_GET, am32Status);
+  server.on("/am32/status", HTTP_OPTIONS, corsPreflightResponse);
+  server.on("/am32", HTTP_OPTIONS, corsPreflightResponse);
+  server.addHandler(new AsyncCallbackJsonWebHandler("/am32", am32Action, 1024));
+#endif
   server.on("/config", HTTP_OPTIONS, corsPreflightResponse);
   server.on("/status.json", HTTP_OPTIONS, corsPreflightResponse);
   #if defined(TARGET_RX) && defined(HAS_BASIC_FLIGHT_CONTROL)

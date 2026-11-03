@@ -2,6 +2,9 @@
 
 #include "devServoOutput.h"
 #include "PWM.h"
+#if defined(PLATFORM_ESP32)
+#include <driver/gpio.h>
+#endif
 #include "CRSF.h"
 #include "config.h"
 #include "logging.h"
@@ -18,14 +21,80 @@ static int8_t servoPins[PWM_MAX_CHANNELS];
 static pwm_channel_t pwmChannels[PWM_MAX_CHANNELS];
 static uint16_t pwmChannelValues[PWM_MAX_CHANNELS];
 static bool initialized = false;
+static bool newChannelsAvailable;
+uint16_t servoOutputModeToFrequency(eServoOutputMode mode);
 
 #if (defined(PLATFORM_ESP32))
 static DShotRMT *dshotInstances[PWM_MAX_CHANNELS] = {nullptr};
 const uint8_t RMT_MAX_CHANNELS = 8;
 #endif
 
+#if defined(PLATFORM_ESP32) && defined(TARGET_RX)
+static volatile int reservedPin = -1;
+#if defined(PLATFORM_ESP32_C3)
+static constexpr uint32_t AM32_RESUME_MARKER = 0xA63220C3;
+RTC_NOINIT_ATTR static uint32_t am32ResumeMarker;
+RTC_NOINIT_ATTR static uint32_t am32ResumePin;
+static bool am32ResumeLocked = false;
+#endif
+bool servoReserveOutputPin(uint8_t pin)
+{
+    if (reservedPin != -1) return false;
+    int ch = -1;
+    for (int i = 0; i < GPIO_PIN_PWM_OUTPUTS_COUNT; ++i)
+        if (GPIO_PIN_PWM_OUTPUTS[i] == pin) ch = i;
+    if (ch < 0 || !initialized ||
+        (eServoOutputMode)config.GetPwmChannel(ch)->val.mode >= somSerial) return false;
+#if defined(PLATFORM_ESP32_C3)
+    am32ResumeMarker = AM32_RESUME_MARKER;
+    am32ResumePin = pin;
+    am32ResumeLocked = true;
+#endif
+    reservedPin = pin;
+    // Give an in-flight servo update time to finish before detaching its driver.
+    delay(2);
+    if (dshotInstances[ch]) {
+        delete dshotInstances[ch];
+        dshotInstances[ch] = nullptr;
+    } else if (pwmChannels[ch] >= 0) {
+        PWM.release(pwmChannels[ch]);
+        pwmChannels[ch] = -1;
+    }
+    gpio_reset_pin((gpio_num_t)pin);
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, HIGH);
+    return true;
+}
+
+void servoRestoreOutputPin(uint8_t pin)
+{
+    if (reservedPin != pin) return;
+    int ch = -1;
+    for (int i = 0; i < GPIO_PIN_PWM_OUTPUTS_COUNT; ++i)
+        if (GPIO_PIN_PWM_OUTPUTS[i] == pin) ch = i;
+    if (ch < 0) return;
+    gpio_reset_pin((gpio_num_t)pin);
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, LOW);
+    const auto mode = (eServoOutputMode)config.GetPwmChannel(ch)->val.mode;
+    if (mode == somDShot) {
+        uint8_t rmtChannel = 0;
+        for (int i = 0; i < ch; ++i)
+            if ((eServoOutputMode)config.GetPwmChannel(i)->val.mode == somDShot) ++rmtChannel;
+        dshotInstances[ch] = new DShotRMT((gpio_num_t)pin, (rmt_channel_t)rmtChannel);
+        dshotInstances[ch]->begin(DSHOT300, false);
+    } else {
+        const auto frequency = servoOutputModeToFrequency(mode);
+        if (frequency) pwmChannels[ch] = PWM.allocate(pin, frequency);
+    }
+    pwmChannelValues[ch] = UINT16_MAX;
+    newChannelsAvailable = false;
+    reservedPin = -1;
+}
+
+#endif
+
 // true when the RX has a new channels packet
-static bool newChannelsAvailable;
 // Absolute max failsafe time if no update is received, regardless of LQ
 static constexpr uint32_t FAILSAFE_ABS_TIMEOUT_MS = 1000U;
 
@@ -73,6 +142,12 @@ uint16_t servoOutputModeToFrequency(eServoOutputMode mode)
 
 static void servoWrite(uint8_t ch, uint16_t us)
 {
+#if defined(PLATFORM_ESP32) && defined(TARGET_RX)
+    if (servoPins[ch] == reservedPin || GPIO_PIN_PWM_OUTPUTS[ch] == reservedPin) return;
+#if defined(PLATFORM_ESP32_C3)
+    if (am32ResumeLocked && GPIO_PIN_PWM_OUTPUTS[ch] == am32ResumePin) return;
+#endif
+#endif
     const rx_config_pwm_t *chConfig = config.GetPwmChannel(ch);
 #if defined(PLATFORM_ESP32)
     if ((eServoOutputMode)chConfig->val.mode == somDShot)
@@ -227,6 +302,22 @@ static void servosUpdate(unsigned long now)
     if (newChannelsAvailable)
     {
         newChannelsAvailable = false;
+#if defined(PLATFORM_ESP32_C3) && defined(TARGET_RX)
+        if (am32ResumeLocked && connectionState == connected)
+        {
+            for (int ch = 0; ch < GPIO_PIN_PWM_OUTPUTS_COUNT; ++ch)
+            {
+                if (GPIO_PIN_PWM_OUTPUTS[ch] != am32ResumePin) continue;
+                const unsigned throttle = ChannelData[config.GetPwmChannel(ch)->val.inputChannel];
+                if (throttle != 0 && CRSF_to_US(throttle) <= 1000U)
+                {
+                    am32ResumeLocked = false;
+                    am32ResumeMarker = 0;
+                }
+                break;
+            }
+        }
+#endif
         lastUpdate = now;
 #if defined(HAS_BASIC_FLIGHT_CONTROL) && defined(TARGET_RX)
         const FlightControlMixerOutput &mixerOutput = flightControlGetMixerOutput();
@@ -307,6 +398,9 @@ static void initialize()
     {
         return;
     }
+#if defined(PLATFORM_ESP32_C3) && defined(TARGET_RX)
+    am32ResumeLocked = am32ResumeMarker == AM32_RESUME_MARKER;
+#endif
 
 #if defined(PLATFORM_ESP32)
     uint8_t rmtCH = 0;
