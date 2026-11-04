@@ -1,5 +1,6 @@
 // Adapted from am32-firmware/Am32-Wifi-Bridge (GPL-3.0).
 // https://github.com/am32-firmware/Am32-Wifi-Bridge
+#if defined(PLATFORM_ESP32_C3) && defined(TARGET_RX)
 #include "am32_bootloader.h"
 
 // Bootloader commands (AM32-bootloader/bootloader/main.c)
@@ -264,3 +265,4 @@ void Am32Bootloader::runApplication() {
   wire.transfer(reset, sizeof(reset), rx, sizeof(rx), 20000);
   connected = false;
 }
+#endif // PLATFORM_ESP32_C3 && TARGET_RX
