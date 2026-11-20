@@ -1,5 +1,6 @@
 #include "rxtx_common.h"
 #include "LowPassFilter.h"
+#include "RxScanOrder.h"
 
 #include "crc.h"
 #include "telemetry_protocol.h"
@@ -200,7 +201,7 @@ LPF LPF_UplinkRSSI0(5);  // track rssi per antenna
 LPF LPF_UplinkRSSI1(5);
 MeanAccumulator<int32_t, int8_t, -16> SnrMean;
 
-static uint8_t scanIndex;
+static RxScanOrder<RATE_MAX> scanOrder;
 uint8_t ExpressLRS_nextAirRateIndex;
 int8_t SwitchModePending;
 
@@ -403,7 +404,7 @@ void SetRFLinkRate(uint8_t index, bool bindMode) // Set speed of RF link
     TelemetrySender.setMaxPackageIndex(OtaIsFullRes ? ELRS8_TELEMETRY_MAX_PACKAGES : ELRS4_TELEMETRY_MAX_PACKAGES);
 
     // Wait for (11/10) 110% of time it takes to cycle through all freqs in FHSS table (in ms)
-    cycleInterval = ((uint32_t)11U * FHSSgetChannelCount() * ModParams->FHSShopInterval * interval) / (10U * 1000U);
+    cycleInterval = rxScanWindowMs(FHSSgetChannelCount(), ModParams->FHSShopInterval, interval);
 
     ExpressLRS_currAirRate_Modparams = ModParams;
     ExpressLRS_currAirRate_RFperfParams = RFperf;
@@ -1693,15 +1694,14 @@ static void setupRadio()
     Radio.RXdoneCallback = &RXdoneISR;
     Radio.TXdoneCallback = &TXdoneISR;
 
-    scanIndex = config.GetRateInitialIdx();
-    for (int i=0 ; i<RATE_MAX ; i++)
-    {
-        if (isSupportedRFRate(scanIndex))
-        {
-            break;
-        }
-        scanIndex = (scanIndex + 1) % RATE_MAX;
-    }
+    const uint8_t scanIndex = scanOrder.begin(config.GetRateInitialIdx(), [](uint8_t index) {
+        if (!isSupportedRFRate(index)) return uint32_t(0);
+        const auto *params = get_elrs_airRateConfig(index);
+        const bool secondary = params->radio_type == RADIO_TYPE_LR1121_LORA_2G4 ||
+            params->radio_type == RADIO_TYPE_LR1121_GFSK_2G4;
+        const uint32_t channels = secondary ? FHSSconfigDualBand->freq_count : FHSSconfig->freq_count;
+        return rxScanWindowMs(channels, params->FHSShopInterval, params->interval);
+    });
     SetRFLinkRate(scanIndex, false);
     // Start slow on the selected rate to give it the best chance
     // to connect before beginning rate cycling
@@ -1735,20 +1735,13 @@ static void cycleRfMode(unsigned long now)
         RFmodeLastCycled = now;
         LastSyncPacket = now;           // reset this variable
         SendLinkStatstoFCForcedSends = 2;
-        SetRFLinkRate(scanIndex % RATE_MAX, false); // switch between rates
+        // The startup rate has already had its listening window; advance once.
+        SetRFLinkRate(scanOrder.next(), false);
         LQCalc.reset100();
         LQCalcDVDA.reset100();
         // Display the current air rate to the user as an indicator something is happening
-        scanIndex++;
         Radio.RXnb();
         DBGLN("%u", ExpressLRS_currAirRate_Modparams->interval);
-
-        // Skip unsupported modes for hardware with only a single LR1121 or with a single RF path
-        while (!isSupportedRFRate(scanIndex % RATE_MAX))
-        {
-            DBGLN("Skip %u", get_elrs_airRateConfig(scanIndex % RATE_MAX)->interval);
-            scanIndex++;
-        }
 
         // Switch to FAST_SYNC if not already in it (won't be if was just connected)
         RFmodeCycleMultiplier = 1;
@@ -1810,7 +1803,7 @@ static void ExitBindingMode()
     #endif
 
     // Force RF cycling to start at the beginning immediately
-    scanIndex = RATE_MAX;
+    scanOrder.restart();
     RFmodeLastCycled = 0;
     LockRFmode = false;
     LostConnection(false);
