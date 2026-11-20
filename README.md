@@ -18,6 +18,9 @@ While retaining the low-latency radio link capabilities of ExpressLRS, GLRS adds
 - Web-based configuration, runtime status, and debugging tools
 - GLRS Configurator for desktop and mobile platforms (work in progress)
 
+### Support Hardware List
+- [LightFin nano](https://humpbacklab.com/en/lightfin-nano.html)
+
 ### Project Status
 
 GLRS is currently under active development and validation. Its flight-control functions are primarily intended for experimentation, learning, and specific hardware integrations. IMU support, pin assignments, and output capabilities vary between receivers. Always perform thorough bench tests before flight, and verify sensor orientation, failsafe behavior, and output ranges.
@@ -75,6 +78,9 @@ Gyro-ExpressLRS，简称 **GLRS**，是一个基于 [ExpressLRS 3.x](https://git
 - 电机/舵机混控输出
 - Web 配置、运行状态查看与调试支持
 - 配套的 GLRS Configurator 桌面/移动端配置工具（开发中）
+
+### 支持的硬件列表
+- [LightFin Nano](https://humpbacklab.com/lightfin-nano.html)
 
 ### 项目状态
 
